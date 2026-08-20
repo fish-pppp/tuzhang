@@ -12,37 +12,41 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MemberAvatar } from "@/components/member-avatar";
 import { parseYuan } from "@/lib/split/money";
-import { useTripStore } from "@/lib/split/store";
+import type { Expense, Trip } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
 
 export function AddExpenseDialog({
   open,
   onOpenChange,
+  trip,
+  defaultPayerId,
+  onAdd,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  trip: Trip;
+  defaultPayerId?: string | null;
+  onAdd: (input: Omit<Expense, "id" | "createdAt">) => void | Promise<void>;
 }) {
-  const trip = useTripStore((s) => s.trip);
-  const selectedMemberId = useTripStore((s) => s.selectedMemberId);
-  const addExpense = useTripStore((s) => s.addExpense);
-
-  const defaultPayer = selectedMemberId ?? trip.members[0]?.id ?? "";
+  const fallbackPayer = defaultPayerId ?? trip.members[0]?.id ?? "";
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
-  const [payerId, setPayerId] = useState(defaultPayer);
+  const [payerId, setPayerId] = useState(fallbackPayer);
   const [participantIds, setParticipantIds] = useState<string[]>(
     trip.members.map((m) => m.id),
   );
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setPayerId(selectedMemberId ?? trip.members[0]?.id ?? "");
+    setPayerId(defaultPayerId ?? trip.members[0]?.id ?? "");
     setParticipantIds(trip.members.map((m) => m.id));
     setTitle("");
     setAmount("");
     setError(null);
-  }, [open, selectedMemberId, trip.members]);
+    setPending(false);
+  }, [open, defaultPayerId, trip.members]);
 
   const allSelected = participantIds.length === trip.members.length;
   const perHead = useMemo(() => {
@@ -54,9 +58,10 @@ export function AddExpenseDialog({
   function resetForm() {
     setTitle("");
     setAmount("");
-    setPayerId(selectedMemberId ?? trip.members[0]?.id ?? "");
+    setPayerId(defaultPayerId ?? trip.members[0]?.id ?? "");
     setParticipantIds(trip.members.map((m) => m.id));
     setError(null);
+    setPending(false);
   }
 
   function toggleParticipant(id: string) {
@@ -69,7 +74,7 @@ export function AddExpenseDialog({
     });
   }
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const cents = parseYuan(amount);
     if (!cents) {
@@ -84,14 +89,21 @@ export function AddExpenseDialog({
       setError("至少选择一位一起 AA 的人");
       return;
     }
-    addExpense({
-      title: title.trim() || "未命名支出",
-      amountCents: cents,
-      payerId,
-      participantIds,
-    });
-    resetForm();
-    onOpenChange(false);
+    setPending(true);
+    try {
+      await onAdd({
+        title: title.trim() || "未命名支出",
+        amountCents: cents,
+        payerId,
+        participantIds,
+      });
+      resetForm();
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "记账失败");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -107,7 +119,7 @@ export function AddExpenseDialog({
           <DialogTitle>记一笔</DialogTitle>
           <DialogDescription>谁先垫了钱，再选一起 AA 的人。</DialogDescription>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="flex min-h-0 flex-col gap-5 overflow-y-auto">
+        <form onSubmit={(e) => void onSubmit(e)} className="flex min-h-0 flex-col gap-5 overflow-y-auto">
           <div className="space-y-2">
             <Label htmlFor="amount">金额</Label>
             <div className="relative">
@@ -212,8 +224,8 @@ export function AddExpenseDialog({
 
           {error && <p className="text-sm text-owe">{error}</p>}
 
-          <Button type="submit" className="h-12 w-full rounded-lg text-base">
-            记入账单
+          <Button type="submit" className="h-12 w-full rounded-lg text-base" disabled={pending}>
+            {pending ? "记账中…" : "记入账单"}
           </Button>
         </form>
       </DialogContent>

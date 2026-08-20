@@ -39,6 +39,7 @@ export function AuthSlot() {
   return (
     <Link
       to="/login"
+      search={{ redirect: undefined }}
       className="inline-flex h-9 items-center rounded-full bg-chip px-3 text-sm font-medium text-fg transition-colors hover:bg-border"
     >
       登录

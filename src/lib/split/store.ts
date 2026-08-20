@@ -7,9 +7,11 @@ import type { Expense, Member, Trip } from "./types";
 type TripState = {
   trip: Trip;
   selectedMemberId: string | null;
+  meId: string | null;
   hydrated: boolean;
   setHydrated: (value: boolean) => void;
   selectMember: (id: string | null) => void;
+  setMeId: (id: string) => void;
   renameTrip: (name: string) => void;
   addExpense: (input: Omit<Expense, "id" | "createdAt">) => void;
   removeExpense: (id: string) => void;
@@ -26,12 +28,14 @@ export const useTripStore = create<TripState>()(
     (set) => ({
       trip: cloneDemoTrip(),
       selectedMemberId: null,
+      meId: null,
       hydrated: false,
       setHydrated: (value) => set({ hydrated: value }),
       selectMember: (id) =>
         set((s) => ({
           selectedMemberId: s.selectedMemberId === id ? null : id,
         })),
+      setMeId: (id) => set({ meId: id, selectedMemberId: id }),
       renameTrip: (name) =>
         set((s) => ({ trip: { ...s.trip, name: name.trim() || s.trip.name } })),
       addExpense: (input) =>
@@ -89,17 +93,18 @@ export const useTripStore = create<TripState>()(
             },
             selectedMemberId:
               s.selectedMemberId === id ? null : s.selectedMemberId,
+            meId: s.meId === id ? null : s.meId,
           };
         }),
       resetDemo: () =>
-        set({ trip: cloneDemoTrip(), selectedMemberId: null }),
+        set({ trip: cloneDemoTrip(), selectedMemberId: null, meId: null }),
       clearExpenses: () =>
         set((s) => ({ trip: { ...s.trip, expenses: [] } })),
       replaceTrip: (trip) => set({ trip, selectedMemberId: null }),
     }),
     {
-      name: "tuzhang-trip-v2",
-      partialize: (s) => ({ trip: s.trip }),
+      name: "tuzhang-trip-v3",
+      partialize: (s) => ({ trip: s.trip, meId: s.meId }),
       skipHydration: true,
     },
   ),
