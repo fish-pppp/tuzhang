@@ -11,7 +11,7 @@ test("normalizeMergeRequest counts added lines and keeps metadata", () => {
   });
   assert.equal(mr.iid, 123);
   assert.equal(mr.author, "alice");
-  assert.equal(mr.files[0].newPath, "src/payment/webhook.js");
+  assert.equal(mr.files[0]?.newPath, "src/payment/webhook.js");
   assert.ok(mr.linesAdded >= 3);
   assert.match(mr.diffSummary, /payment\/webhook\.js/);
 });

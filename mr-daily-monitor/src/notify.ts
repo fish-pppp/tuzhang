@@ -1,6 +1,8 @@
+import type { Brief, FetchLike, NotifyResult } from "./types.js";
+
 const FEISHU_HINT = /feishu|larksuite|lark/i;
 
-export function buildWebhookPayload(brief, webhookUrl) {
+export function buildWebhookPayload(brief: Pick<Brief, "markdown" | "json">, webhookUrl?: string): Record<string, unknown> {
   if (webhookUrl && FEISHU_HINT.test(webhookUrl)) {
     return {
       msg_type: "text",
@@ -15,7 +17,18 @@ export function buildWebhookPayload(brief, webhookUrl) {
   };
 }
 
-export async function notifyBrief(brief, { webhookUrl, dryRun = false, fetchImpl = fetch } = {}) {
+export async function notifyBrief(
+  brief: Pick<Brief, "markdown" | "json">,
+  {
+    webhookUrl,
+    dryRun = false,
+    fetchImpl = fetch as FetchLike,
+  }: {
+    webhookUrl?: string;
+    dryRun?: boolean;
+    fetchImpl?: FetchLike;
+  } = {},
+): Promise<NotifyResult> {
   if (dryRun || !webhookUrl) {
     return { skipped: true, reason: dryRun ? "dry-run" : "no-webhook" };
   }

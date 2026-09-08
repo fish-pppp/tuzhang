@@ -7,6 +7,7 @@
 ## 需要什么
 
 - Node.js 20+
+- TypeScript（用 `tsx` 直接跑，不必先编译）
 - 能读目标项目已合入 MR 的 GitLab token（`read_api` 即可）
 - 公司内网通义千问，推荐 **OpenAI 兼容** 地址（`.../compatible-mode/v1` 或 `.../v1`）
 
@@ -62,5 +63,6 @@ npm run digest -- run --from 2026-09-07T00:00:00+08:00 --to 2026-09-08T00:00:00+
 ## 测试
 
 ```bash
-npm test
+npm test          # tsc --noEmit + node:test
+npm run typecheck
 ```

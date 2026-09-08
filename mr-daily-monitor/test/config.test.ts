@@ -15,5 +15,5 @@ test("example config reads env-backed tokens and qwen settings", () => {
   assert.ok(config.gitlab.projects.includes("group/app-a"));
   assert.equal(config.qwen.protocol, "compatible");
   assert.equal(config.qwen.model, "qwen-plus");
-  assert.equal(config.notify.webhookUrl.includes("feishu"), true);
+  assert.equal(config.notify.webhookUrl?.includes("feishu"), true);
 });

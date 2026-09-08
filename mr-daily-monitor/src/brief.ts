@@ -1,8 +1,10 @@
-const LEVEL_ORDER = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+import type { Brief, BriefJson, MergeRequest, RiskLevel, TimeWindow } from "./types.js";
 
-export function sortMrsForTesting(mrs) {
+const LEVEL_ORDER: Record<RiskLevel, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+
+export function sortMrsForTesting(mrs: MergeRequest[]): MergeRequest[] {
   return [...mrs].sort((a, b) => {
-    const levelDelta = (LEVEL_ORDER[a.risk?.level] ?? 9) - (LEVEL_ORDER[b.risk?.level] ?? 9);
+    const levelDelta = (LEVEL_ORDER[a.risk?.level ?? "LOW"] ?? 9) - (LEVEL_ORDER[b.risk?.level ?? "LOW"] ?? 9);
     if (levelDelta !== 0) {
       return levelDelta;
     }
@@ -14,18 +16,18 @@ export function sortMrsForTesting(mrs) {
   });
 }
 
-export function summarizeLevels(mrs) {
+export function summarizeLevels(mrs: MergeRequest[]): Record<RiskLevel, number> {
   return mrs.reduce(
     (acc, mr) => {
       const level = mr.risk?.level ?? "LOW";
       acc[level] = (acc[level] ?? 0) + 1;
       return acc;
     },
-    { HIGH: 0, MEDIUM: 0, LOW: 0 },
+    { HIGH: 0, MEDIUM: 0, LOW: 0 } as Record<RiskLevel, number>,
   );
 }
 
-function formatMrSection(mr) {
+function formatMrSection(mr: MergeRequest): string {
   const features = (mr.features ?? []).map((item) => `- ${item}`).join("\n") || "- （无）";
   const cases = (mr.testCases ?? []).map((item) => `- ${item}`).join("\n") || "- （无）";
   const reasons = (mr.risk?.reasons ?? []).join("；") || "无明显规则命中";
@@ -43,7 +45,7 @@ function formatMrSection(mr) {
   ].join("\n");
 }
 
-export function renderBrief(mrs, window) {
+export function renderBrief(mrs: MergeRequest[], window: TimeWindow): Brief {
   const sorted = sortMrsForTesting(mrs);
   const levels = summarizeLevels(sorted);
   const date = window.date;
@@ -65,7 +67,7 @@ export function renderBrief(mrs, window) {
   }
 
   const markdown = `${lines.join("\n")}\n`;
-  const json = {
+  const json: BriefJson = {
     date,
     timezone: window.timeZone,
     window: {

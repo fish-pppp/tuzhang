@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderBrief, sortMrsForTesting } from "../src/brief.js";
-import { exampleConfig, normalizedFixture } from "./helpers.js";
-import { scoreRisk } from "../src/risk.js";
 import { fallbackSemantics } from "../src/qwen.js";
+import { scoreRisk } from "../src/risk.js";
+import type { AppConfig, MergeRequest } from "../src/types.js";
 import { resolveWindow } from "../src/window.js";
+import { exampleConfig, normalizedFixture, type FixtureName } from "./helpers.js";
 
-function scored(name, config) {
+function scored(name: FixtureName, config: AppConfig): MergeRequest {
   const mr = normalizedFixture(name);
   const risk = scoreRisk(mr, config.risk);
   return { ...mr, risk, ...fallbackSemantics(mr) };
@@ -18,8 +19,8 @@ test("sorts HIGH before LOW", () => {
     scored("lowDocs", config),
     scored("highPayment", config),
   ]);
-  assert.equal(sorted[0].iid, 123);
-  assert.equal(sorted[1].iid, 124);
+  assert.equal(sorted[0]?.iid, 123);
+  assert.equal(sorted[1]?.iid, 124);
 });
 
 test("renderBrief puts high-risk MRs under 优先测", () => {
@@ -35,5 +36,5 @@ test("renderBrief puts high-risk MRs under 优先测", () => {
   assert.ok(priorityIndex < highIndex && highIndex < restIndex);
   assert.ok(restIndex < lowIndex);
   assert.equal(brief.json.summary.HIGH, 1);
-  assert.equal(brief.json.mergeRequests[0].iid, 123);
+  assert.equal(brief.json.mergeRequests[0]?.iid, 123);
 });

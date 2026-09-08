@@ -1,9 +1,22 @@
 import OpenAI from "openai";
+import type {
+  ChatCompletionsClient,
+  ChatMessage,
+  FetchLike,
+  MergeRequest,
+  QwenConfig,
+} from "./types.js";
 
 const SYSTEM_PROMPT = "你是资深测试工程师。只输出 JSON 对象，不要解释。";
 
-export function fallbackSemantics(mr) {
-  const features = [];
+export interface SemanticResult {
+  features: string[];
+  testCases: string[];
+  llmFallback?: boolean;
+}
+
+export function fallbackSemantics(mr: Pick<MergeRequest, "title" | "description" | "files">): SemanticResult {
+  const features: string[] = [];
   if (mr.title) {
     features.push(mr.title);
   }
@@ -24,7 +37,7 @@ export function fallbackSemantics(mr) {
   };
 }
 
-export function parseModelJson(text) {
+export function parseModelJson(text: string): SemanticResult {
   if (!text || typeof text !== "string") {
     throw new Error("empty model response");
   }
@@ -35,7 +48,11 @@ export function parseModelJson(text) {
   if (start < 0 || end < start) {
     throw new Error("model response is not JSON");
   }
-  const parsed = JSON.parse(raw.slice(start, end + 1));
+  const parsed = JSON.parse(raw.slice(start, end + 1)) as {
+    features?: unknown;
+    testCases?: unknown;
+    test_cases?: unknown;
+  };
   const features = Array.isArray(parsed.features)
     ? parsed.features.map(String).filter(Boolean)
     : [];
@@ -50,7 +67,7 @@ export function parseModelJson(text) {
   return { features, testCases };
 }
 
-export function buildUserPrompt(mr) {
+export function buildUserPrompt(mr: MergeRequest): string {
   const fileList = (mr.files ?? [])
     .map((file) => `- ${file.deletedFile ? "[del] " : ""}${file.newPath || file.oldPath}`)
     .join("\n");
@@ -68,11 +85,11 @@ export function buildUserPrompt(mr) {
   ].join("\n\n");
 }
 
-function compatibleUrl(baseUrl) {
+function compatibleUrl(baseUrl: string): string {
   return String(baseUrl).replace(/\/+$/, "");
 }
 
-export function dashscopeUrl(baseUrl) {
+export function dashscopeUrl(baseUrl: string): string {
   const trimmed = compatibleUrl(baseUrl);
   if (trimmed.includes("/services/aigc/text-generation/generation")) {
     return trimmed;
@@ -87,7 +104,14 @@ export async function callCompatibleQwen({
   messages,
   timeoutSec = 60,
   openaiClient,
-}) {
+}: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: ChatMessage[];
+  timeoutSec?: number;
+  openaiClient?: ChatCompletionsClient;
+}): Promise<string> {
   const client = openaiClient ?? new OpenAI({
     apiKey,
     baseURL: compatibleUrl(baseUrl),
@@ -102,7 +126,8 @@ export async function callCompatibleQwen({
     });
     return completion.choices?.[0]?.message?.content ?? "";
   } catch (error) {
-    if (/response_format|json_object/i.test(String(error?.message ?? error))) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/response_format|json_object/i.test(message)) {
       const completion = await client.chat.completions.create({ model, messages });
       return completion.choices?.[0]?.message?.content ?? "";
     }
@@ -116,8 +141,15 @@ export async function callDashscopeQwen({
   model,
   messages,
   timeoutSec = 60,
-  fetchImpl = fetch,
-}) {
+  fetchImpl = fetch as FetchLike,
+}: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: ChatMessage[];
+  timeoutSec?: number;
+  fetchImpl?: FetchLike;
+}): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutSec * 1000);
   try {
@@ -138,18 +170,25 @@ export async function callDashscopeQwen({
       const body = await response.text();
       throw new Error(`DashScope ${response.status}: ${body.slice(0, 300)}`);
     }
-    const payload = await response.json();
-    return (
-      payload.output?.choices?.[0]?.message?.content
-      ?? payload.output?.text
-      ?? ""
-    );
+    const payload = await response.json() as {
+      output?: {
+        choices?: Array<{ message?: { content?: string } }>;
+        text?: string;
+      };
+    };
+    return payload.output?.choices?.[0]?.message?.content ?? payload.output?.text ?? "";
   } finally {
     clearTimeout(timer);
   }
 }
 
-export async function enrichMr(mr, options) {
+export interface EnrichOptions {
+  qwen?: Partial<QwenConfig>;
+  openaiClient?: ChatCompletionsClient;
+  fetchImpl?: FetchLike;
+}
+
+export async function enrichMr(mr: MergeRequest, options: EnrichOptions): Promise<MergeRequest> {
   const qwen = options.qwen ?? {};
   if (!qwen.enabled) {
     return { ...mr, ...fallbackSemantics(mr) };
@@ -162,7 +201,7 @@ export async function enrichMr(mr, options) {
     };
   }
 
-  const messages = [
+  const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: buildUserPrompt(mr) },
   ];
@@ -196,8 +235,8 @@ export async function enrichMr(mr, options) {
   }
 }
 
-export async function enrichMrs(mrs, options) {
-  const enriched = [];
+export async function enrichMrs(mrs: MergeRequest[], options: EnrichOptions): Promise<MergeRequest[]> {
+  const enriched: MergeRequest[] = [];
   for (const mr of mrs) {
     enriched.push(await enrichMr(mr, options));
   }

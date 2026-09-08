@@ -1,7 +1,15 @@
 import { Gitlab } from "@gitbeaker/rest";
+import type {
+  ChangedFile,
+  GitlabChangesPayload,
+  GitlabClient,
+  MergeRequest,
+  RawGitlabChange,
+  RawGitlabMr,
+} from "./types.js";
 import { isMergedInWindow } from "./window.js";
 
-export function createGitlabClient({ host, token } = {}) {
+export function createGitlabClient({ host, token }: { host?: string; token?: string } = {}): GitlabClient {
   if (!host) {
     throw new Error("gitlab.url is required");
   }
@@ -13,38 +21,37 @@ export function createGitlabClient({ host, token } = {}) {
 
   return {
     async listMergedMrs({ projectId, mergedAfter, mergedBefore }) {
-      return api.MergeRequests.all({
+      const mrs = await api.MergeRequests.all({
         projectId,
         state: "merged",
         scope: "all",
         updatedAfter: mergedAfter,
-        // GitLab 支持 merged_after；GitBeaker 类型未列出，运行时仍传给查询串。
-        mergedAfter,
-        mergedBefore,
+        ...({ mergedAfter, mergedBefore } as Record<string, string>),
       });
+      return mrs as RawGitlabMr[];
     },
     async getChanges(projectId, iid) {
       if (typeof api.MergeRequests.showChanges === "function") {
-        return api.MergeRequests.showChanges(projectId, iid);
+        return api.MergeRequests.showChanges(projectId, iid) as Promise<GitlabChangesPayload>;
       }
       const diffs = await api.MergeRequests.allDiffs(projectId, iid);
-      return { changes: diffs };
+      return { changes: diffs as RawGitlabChange[] };
     },
   };
 }
 
-export function countDiffLines(diff, prefix) {
+export function countDiffLines(diff: string | undefined, prefix: string): number {
   if (!diff) {
     return 0;
   }
   return diff.split("\n").filter((line) => line.startsWith(prefix) && !line.startsWith(prefix + prefix)).length;
 }
 
-export function truncateDiff(files, maxDiffChars) {
+export function truncateDiff(files: Array<Pick<ChangedFile, "oldPath" | "newPath" | "diff">>, maxDiffChars: number): string {
   if (maxDiffChars <= 0) {
     return "";
   }
-  const chunks = [];
+  const chunks: string[] = [];
   let used = 0;
   for (const file of files) {
     if (used >= maxDiffChars) {
@@ -63,12 +70,16 @@ export function truncateDiff(files, maxDiffChars) {
   return chunks.join("\n").slice(0, maxDiffChars);
 }
 
-export function normalizeMergeRequest(mr, changesPayload, { project, maxDiffChars = 12000 } = {}) {
+export function normalizeMergeRequest(
+  mr: RawGitlabMr,
+  changesPayload: GitlabChangesPayload | RawGitlabChange[] | undefined,
+  { project, maxDiffChars = 12000 }: { project?: string | number; maxDiffChars?: number } = {},
+): MergeRequest {
   const rawChanges = Array.isArray(changesPayload)
     ? changesPayload
     : changesPayload?.changes ?? [];
 
-  const files = rawChanges.map((change) => {
+  const files: ChangedFile[] = rawChanges.map((change) => {
     const oldPath = change.old_path ?? change.oldPath ?? "";
     const newPath = change.new_path ?? change.newPath ?? oldPath;
     const diff = change.diff ?? "";
@@ -85,7 +96,7 @@ export function normalizeMergeRequest(mr, changesPayload, { project, maxDiffChar
   });
 
   return {
-    project: project ?? mr.project_id ?? mr.projectId,
+    project: project ?? mr.project_id ?? mr.projectId ?? mr.project ?? "",
     iid: mr.iid,
     id: mr.id,
     title: mr.title ?? "",
@@ -101,19 +112,24 @@ export function normalizeMergeRequest(mr, changesPayload, { project, maxDiffChar
   };
 }
 
-export async function ingestMergedMrs(client, {
+export async function ingestMergedMrs(client: GitlabClient, {
   projects,
   start,
   end,
   maxDiffChars = 12000,
-} = {}) {
+}: {
+  projects?: string[];
+  start: Date;
+  end: Date;
+  maxDiffChars?: number;
+}): Promise<MergeRequest[]> {
   if (!projects?.length) {
     throw new Error("gitlab.projects must list at least one project");
   }
 
   const mergedAfter = start.toISOString();
   const mergedBefore = end.toISOString();
-  const collected = [];
+  const collected: MergeRequest[] = [];
 
   for (const project of projects) {
     const mrs = await client.listMergedMrs({

@@ -7,6 +7,7 @@ import {
   fallbackSemantics,
   parseModelJson,
 } from "../src/qwen.js";
+import type { FetchLike } from "../src/types.js";
 import { exampleConfig, normalizedFixture } from "./helpers.js";
 import { scoreRisk } from "../src/risk.js";
 
@@ -51,7 +52,7 @@ test("enrichMr degrades when qwen is disabled or the model fails", async () => {
   const mr = normalizedFixture("lowDocs");
   const disabled = await enrichMr(mr, { qwen: { enabled: false } });
   assert.equal(disabled.llmFallback, true);
-  assert.ok(disabled.features.includes("更新 README"));
+  assert.ok(disabled.features?.includes("更新 README"));
 
   const failed = await enrichMr(mr, {
     qwen: {
@@ -72,7 +73,7 @@ test("enrichMr degrades when qwen is disabled or the model fails", async () => {
     },
   });
   assert.equal(failed.llmFallback, true);
-  assert.match(failed.llmError, /gateway down/);
+  assert.match(failed.llmError ?? "", /gateway down/);
 });
 
 test("dashscope protocol posts native generation body", async () => {
@@ -81,11 +82,15 @@ test("dashscope protocol posts native generation body", async () => {
     "https://llm.corp.example.com/api/v1/services/aigc/text-generation/generation",
   );
 
-  let captured;
-  const fetchImpl = async (url, init) => {
+  let captured: { url: string; init?: RequestInit } | undefined;
+  const fetchImpl: FetchLike = async (url, init) => {
     captured = { url, init };
     return {
       ok: true,
+      status: 200,
+      async text() {
+        return "";
+      },
       async json() {
         return { output: { choices: [{ message: { content: "{\"features\":[\"A\"],\"testCases\":[\"B\"]}" } }] } };
       },
@@ -99,8 +104,11 @@ test("dashscope protocol posts native generation body", async () => {
     fetchImpl,
   });
   assert.match(text, /features/);
-  assert.equal(captured.url, "https://llm.corp.example.com/api/v1/services/aigc/text-generation/generation");
-  const body = JSON.parse(captured.init.body);
+  assert.equal(captured?.url, "https://llm.corp.example.com/api/v1/services/aigc/text-generation/generation");
+  const body = JSON.parse(String(captured?.init?.body)) as {
+    model: string;
+    input: { messages: Array<{ content: string }> };
+  };
   assert.equal(body.model, "qwen-plus");
-  assert.equal(body.input.messages[0].content, "hi");
+  assert.equal(body.input.messages[0]?.content, "hi");
 });

@@ -2,9 +2,10 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { config as loadDotenv } from "dotenv";
 import { loadConfig } from "./config.js";
-import { runDigest } from "./run.js";
+import { runDigest, type DigestResult } from "./run.js";
+import type { ChatCompletionsClient, EnvMap, FetchLike, GitlabClient } from "./types.js";
 
-function printHelp() {
+function printHelp(): void {
   console.log(`Usage:
   mrdigest run --since yesterday [--config config.yml]
   mrdigest run --since today
@@ -22,7 +23,7 @@ Options:
 `);
 }
 
-export function parseCli(argv) {
+export function parseCli(argv: string[]) {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -44,14 +45,23 @@ export function parseCli(argv) {
   };
 }
 
-export async function main(argv, {
+export interface MainOptions {
+  env?: EnvMap;
+  cwd?: string;
+  gitlabClient?: GitlabClient;
+  openaiClient?: ChatCompletionsClient;
+  fetchImpl?: FetchLike;
+  stdout?: { log: (line: string) => void };
+}
+
+export async function main(argv: string[], {
   env = process.env,
   cwd = process.cwd(),
   gitlabClient,
   openaiClient,
   fetchImpl,
   stdout = console,
-} = {}) {
+}: MainOptions = {}): Promise<DigestResult | { ok: true; help: true }> {
   loadDotenv({ path: `${cwd}/.env` });
   const parsed = parseCli(argv);
 
@@ -64,14 +74,14 @@ export async function main(argv, {
     throw new Error(`Unknown command: ${parsed.command}`);
   }
 
-  const config = loadConfig(resolve(cwd, parsed.values.config), env);
+  const config = loadConfig(resolve(cwd, parsed.values.config ?? "config.yml"), env);
   const result = await runDigest({
     config,
     since: parsed.values.since,
     from: parsed.values.from,
     to: parsed.values.to,
     dryRun: parsed.values["dry-run"],
-    outDir: resolve(cwd, parsed.values["out-dir"]),
+    outDir: resolve(cwd, parsed.values["out-dir"] ?? "reports"),
     gitlabClient,
     openaiClient,
     fetchImpl,

@@ -1,26 +1,27 @@
 import { minimatch } from "minimatch";
+import type { ChangedFile, MergeRequest, RiskConfig, RiskFinding, RiskLevel, RiskResult } from "./types.js";
 
 const TODO_RE = /\b(TODO|FIXME|HACK)\b/;
 const DEBUG_RE = /\b(console\.log|debugger|printStackTrace|pdb\.set_trace)\b/;
 
-function filePath(file) {
+function filePath(file: Pick<ChangedFile, "newPath" | "oldPath">): string {
   return file.newPath || file.oldPath || "";
 }
 
-function matchesAny(path, globs) {
+function matchesAny(path: string, globs: string[]): boolean {
   return globs.some((glob) => minimatch(path, glob, { dot: true, nocase: true }));
 }
 
-function isTestFile(path, testGlobs) {
+function isTestFile(path: string, testGlobs: string[]): boolean {
   return matchesAny(path, testGlobs);
 }
 
-function isDocFile(path) {
+function isDocFile(path: string): boolean {
   return /\.(md|txt|rst|adoc)$/i.test(path)
     || /(^|\/)(README|LICENSE|CHANGELOG)(\.|$)/i.test(path);
 }
 
-function isSourceFile(path, testGlobs) {
+function isSourceFile(path: string, testGlobs: string[]): boolean {
   if (!path) {
     return false;
   }
@@ -30,7 +31,7 @@ function isSourceFile(path, testGlobs) {
   return true;
 }
 
-function addedContent(file) {
+function addedContent(file: Pick<ChangedFile, "diff">): string {
   return (file.diff || "")
     .split("\n")
     .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
@@ -38,11 +39,14 @@ function addedContent(file) {
     .join("\n");
 }
 
-function basename(path) {
+function basename(path: string): string {
   return path.split("/").pop() ?? path;
 }
 
-export function scoreRisk(mr, riskConfig = {}) {
+export function scoreRisk(
+  mr: Pick<MergeRequest, "files" | "linesAdded">,
+  riskConfig: Partial<RiskConfig> = {},
+): RiskResult {
   const largePrLines = riskConfig.largePrLines ?? 300;
   const concentrationRatio = riskConfig.concentrationRatio ?? 0.6;
   const minConcentrationLines = riskConfig.minConcentrationLines ?? 80;
@@ -50,7 +54,7 @@ export function scoreRisk(mr, riskConfig = {}) {
   const dependencyFiles = new Set((riskConfig.dependencyFiles ?? []).map((name) => name.toLowerCase()));
   const testGlobs = riskConfig.testGlobs ?? [];
   const files = mr.files ?? [];
-  const findings = [];
+  const findings: RiskFinding[] = [];
 
   const totalChanged = files.reduce((sum, file) => sum + file.addedLines + file.removedLines, 0);
   if ((mr.linesAdded ?? 0) >= largePrLines) {
@@ -151,7 +155,7 @@ export function scoreRisk(mr, riskConfig = {}) {
   const score = findings.reduce((sum, item) => sum + item.points, 0);
   const hasHigh = findings.some((item) => item.severity === "HIGH");
   const hasMedium = findings.some((item) => item.severity === "MEDIUM");
-  let level = "LOW";
+  let level: RiskLevel = "LOW";
   if (hasHigh || score >= 40) {
     level = "HIGH";
   } else if (hasMedium || score >= 15) {

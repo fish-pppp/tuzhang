@@ -1,6 +1,8 @@
+import type { TimeWindow } from "./types.js";
+
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-export function calendarDateInZone(date, timeZone) {
+export function calendarDateInZone(date: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -9,7 +11,7 @@ export function calendarDateInZone(date, timeZone) {
   }).format(date);
 }
 
-export function addCalendarDays(dateStr, days) {
+export function addCalendarDays(dateStr: string, days: number): string {
   const match = DATE_ONLY.exec(dateStr);
   if (!match) {
     throw new Error(`Invalid calendar date: ${dateStr}`);
@@ -18,7 +20,7 @@ export function addCalendarDays(dateStr, days) {
   return new Date(utc).toISOString().slice(0, 10);
 }
 
-function tzOffsetMs(instant, timeZone) {
+function tzOffsetMs(instant: Date, timeZone: string): number {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-US", {
       timeZone,
@@ -44,7 +46,15 @@ function tzOffsetMs(instant, timeZone) {
   return asUtc - instant.getTime();
 }
 
-export function zonedLocalToUtc(year, month, day, hour, minute, second, timeZone) {
+export function zonedLocalToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timeZone: string,
+): Date {
   const asUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
   let offset = tzOffsetMs(new Date(asUtcMs), timeZone);
   let utc = asUtcMs - offset;
@@ -53,7 +63,7 @@ export function zonedLocalToUtc(year, month, day, hour, minute, second, timeZone
   return new Date(utc);
 }
 
-export function zonedDayStart(dateStr, timeZone) {
+export function zonedDayStart(dateStr: string, timeZone: string): Date {
   const match = DATE_ONLY.exec(dateStr);
   if (!match) {
     throw new Error(`Invalid calendar date: ${dateStr}`);
@@ -75,7 +85,13 @@ export function resolveWindow({
   to,
   timeZone = "Asia/Shanghai",
   now = new Date(),
-} = {}) {
+}: {
+  since?: string;
+  from?: string;
+  to?: string;
+  timeZone?: string;
+  now?: Date;
+} = {}): TimeWindow {
   if (from || to) {
     if (!from || !to) {
       throw new Error("Both --from and --to are required when overriding the window");
@@ -99,8 +115,8 @@ export function resolveWindow({
 
   const today = calendarDateInZone(now, timeZone);
   let date = today;
-  let start;
-  let end;
+  let start: Date;
+  let end: Date;
 
   if (!since || since === "today") {
     start = zonedDayStart(today, timeZone);
@@ -127,7 +143,11 @@ export function resolveWindow({
   };
 }
 
-export function isMergedInWindow(mr, start, end) {
+export function isMergedInWindow(
+  mr: { merged_at?: string | null; mergedAt?: string | null },
+  start: Date,
+  end: Date,
+): boolean {
   const mergedAt = mr.merged_at ?? mr.mergedAt;
   if (!mergedAt) {
     return false;
