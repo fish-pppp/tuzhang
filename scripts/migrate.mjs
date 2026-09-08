@@ -16,6 +16,12 @@ import pg from "pg";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
+  if (process.env.VERCEL) {
+    console.error(
+      "[migrate] DATABASE_URL is required on Vercel. Add a Postgres URL (Neon recommended) in Project Settings → Environment Variables, then redeploy.",
+    );
+    process.exit(1);
+  }
   console.log(
     "[migrate] DATABASE_URL not set — skipping (the PGLite fallback migrates itself).",
   );
