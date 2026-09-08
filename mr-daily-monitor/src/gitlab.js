@@ -41,24 +41,26 @@ export function countDiffLines(diff, prefix) {
 }
 
 export function truncateDiff(files, maxDiffChars) {
+  if (maxDiffChars <= 0) {
+    return "";
+  }
   const chunks = [];
   let used = 0;
   for (const file of files) {
-    const header = `--- ${file.oldPath}\n+++ ${file.newPath}\n`;
-    const remaining = Math.max(0, maxDiffChars - used);
-    if (remaining <= 0) {
-      chunks.push("...[diff truncated]");
+    if (used >= maxDiffChars) {
       break;
     }
-    const body = file.diff || "";
-    const slice = body.length > remaining - header.length
-      ? `${body.slice(0, Math.max(0, remaining - header.length))}\n...[diff truncated]`
-      : body;
-    const chunk = header + slice;
+    const header = `--- ${file.oldPath}\n+++ ${file.newPath}\n`;
+    const available = maxDiffChars - used;
+    let chunk = header + (file.diff || "");
+    if (chunk.length > available) {
+      const marker = "\n...[diff truncated]";
+      chunk = `${chunk.slice(0, Math.max(0, available - marker.length))}${marker}`;
+    }
     chunks.push(chunk);
     used += chunk.length;
   }
-  return chunks.join("\n");
+  return chunks.join("\n").slice(0, maxDiffChars);
 }
 
 export function normalizeMergeRequest(mr, changesPayload, { project, maxDiffChars = 12000 } = {}) {

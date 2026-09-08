@@ -61,6 +61,7 @@ export function loadConfig(configPath, env = process.env) {
     risk: {
       largePrLines: Number(risk.large_pr_lines ?? 300),
       concentrationRatio: Number(risk.concentration_ratio ?? 0.6),
+      minConcentrationLines: Number(risk.min_concentration_lines ?? 80),
       riskyPathGlobs: risk.risky_path_globs ?? DEFAULT_RISKY_PATH_GLOBS,
       dependencyFiles: risk.dependency_files ?? DEFAULT_DEPENDENCY_FILES,
       testGlobs: risk.test_globs ?? DEFAULT_TEST_GLOBS,

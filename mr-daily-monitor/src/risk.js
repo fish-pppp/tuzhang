@@ -15,14 +15,19 @@ function isTestFile(path, testGlobs) {
   return matchesAny(path, testGlobs);
 }
 
+function isDocFile(path) {
+  return /\.(md|txt|rst|adoc)$/i.test(path)
+    || /(^|\/)(README|LICENSE|CHANGELOG)(\.|$)/i.test(path);
+}
+
 function isSourceFile(path, testGlobs) {
   if (!path) {
     return false;
   }
-  if (isTestFile(path, testGlobs)) {
+  if (isTestFile(path, testGlobs) || isDocFile(path)) {
     return false;
   }
-  return !/(^|\/)(README|LICENSE|CHANGELOG)(\.|$)/i.test(path);
+  return true;
 }
 
 function addedContent(file) {
@@ -40,6 +45,7 @@ function basename(path) {
 export function scoreRisk(mr, riskConfig = {}) {
   const largePrLines = riskConfig.largePrLines ?? 300;
   const concentrationRatio = riskConfig.concentrationRatio ?? 0.6;
+  const minConcentrationLines = riskConfig.minConcentrationLines ?? 80;
   const riskyPathGlobs = riskConfig.riskyPathGlobs ?? [];
   const dependencyFiles = new Set((riskConfig.dependencyFiles ?? []).map((name) => name.toLowerCase()));
   const testGlobs = riskConfig.testGlobs ?? [];
@@ -63,7 +69,13 @@ export function scoreRisk(mr, riskConfig = {}) {
         size: file.addedLines + file.removedLines,
       }))
       .sort((a, b) => b.size - a.size)[0];
-    if (dominant && dominant.size / totalChanged > concentrationRatio) {
+    const docsOnly = files.length > 0 && files.every((file) => isDocFile(filePath(file)));
+    if (
+      !docsOnly
+      && totalChanged >= minConcentrationLines
+      && dominant
+      && dominant.size / totalChanged > concentrationRatio
+    ) {
       findings.push({
         id: "risk-concentration",
         severity: "HIGH",

@@ -22,7 +22,7 @@ npm install
 npm run digest -- run --since yesterday --config config.yml --dry-run
 ```
 
-报告写到 `reports/YYYY-MM-DD.md` 和 `.json`。`--dry-run` 或 `DRY_RUN=1` 只写文件、不发 webhook。
+报告写到 `reports/YYYY-MM-DD.md` 和 `.json`。`--dry-run` 或 `DRY_RUN=1` 只写文件、不发 webhook。样例见 [examples/sample-brief.md](examples/sample-brief.md)。
 
 ```bash
 npm run digest -- run --since today

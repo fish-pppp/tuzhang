@@ -22,7 +22,7 @@ test("truncateDiff stops at max chars", () => {
     { oldPath: "b.js", newPath: "b.js", diff: "y".repeat(80) },
   ], 60);
   assert.match(summary, /truncated/);
-  assert.ok(summary.length <= 90);
+  assert.ok(summary.length <= 60);
 });
 
 test("ingestMergedMrs keeps only MRs merged in the window", async () => {

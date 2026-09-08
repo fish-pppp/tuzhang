@@ -9,6 +9,7 @@ gitlab:
 risk:
   large_pr_lines: 300
   concentration_ratio: 0.6
+  min_concentration_lines: 80
   risky_path_globs:
     - "**/auth/**"
     - "**/payment/**"
