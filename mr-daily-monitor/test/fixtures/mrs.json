@@ -1,0 +1,74 @@
+{
+  "highPayment": {
+    "project": "group/pay",
+    "iid": 123,
+    "id": 9001,
+    "title": "支付回调重试",
+    "description": "失败回调最多重试 3 次，超时改为 10s。",
+    "web_url": "https://gitlab.example.com/group/pay/-/merge_requests/123",
+    "author": { "username": "alice" },
+    "merged_at": "2026-09-07T10:15:00+08:00",
+    "labels": ["backend"],
+    "changes": [
+      {
+        "old_path": "src/payment/webhook.js",
+        "new_path": "src/payment/webhook.js",
+        "diff": "@@\n-const TIMEOUT = 3\n+const TIMEOUT = 10\n+// TODO: 确认对账侧是否接受重复通知\n+function retry() {}\n"
+      }
+    ]
+  },
+  "lowDocs": {
+    "project": "group/pay",
+    "iid": 124,
+    "id": 9002,
+    "title": "更新 README",
+    "description": "补充本地启动说明",
+    "web_url": "https://gitlab.example.com/group/pay/-/merge_requests/124",
+    "author": { "username": "bob" },
+    "merged_at": "2026-09-07T18:00:00+08:00",
+    "labels": [],
+    "changes": [
+      {
+        "old_path": "README.md",
+        "new_path": "README.md",
+        "diff": "@@\n+## 本地启动\n+npm start\n"
+      }
+    ]
+  },
+  "outsideWindow": {
+    "project": "group/pay",
+    "iid": 99,
+    "id": 8000,
+    "title": "昨天之前的改动",
+    "description": "",
+    "web_url": "https://gitlab.example.com/group/pay/-/merge_requests/99",
+    "author": { "username": "carol" },
+    "merged_at": "2026-09-06T10:00:00+08:00",
+    "labels": [],
+    "changes": []
+  },
+  "withTests": {
+    "project": "group/app",
+    "iid": 50,
+    "id": 7000,
+    "title": "订单列表筛选",
+    "description": "增加按状态筛选",
+    "web_url": "https://gitlab.example.com/group/app/-/merge_requests/50",
+    "author": { "username": "dana" },
+    "merged_at": "2026-09-07T12:00:00+08:00",
+    "labels": [],
+    "changes": [
+      {
+        "old_path": "src/orders/list.js",
+        "new_path": "src/orders/list.js",
+        "diff": "@@\n+export function byStatus(items, status) { return items.filter(i => i.status === status) }\n"
+      },
+      {
+        "old_path": "src/orders/list.test.js",
+        "new_path": "src/orders/list.test.js",
+        "new_file": true,
+        "diff": "@@\n+test('filters', () => {})\n"
+      }
+    ]
+  }
+}

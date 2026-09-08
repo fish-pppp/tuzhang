@@ -1,0 +1,48 @@
+gitlab:
+  url: https://gitlab.example.com
+  token_env: GITLAB_TOKEN
+  projects:
+    - group/app-a
+    - group/app-b
+  timezone: Asia/Shanghai
+
+risk:
+  large_pr_lines: 300
+  concentration_ratio: 0.6
+  risky_path_globs:
+    - "**/auth/**"
+    - "**/payment/**"
+    - "**/pay/**"
+    - "**/*migration*"
+    - "**/infra/**"
+    - "**/.gitlab-ci.yml"
+    - "**/Dockerfile*"
+  dependency_files:
+    - package.json
+    - package-lock.json
+    - pnpm-lock.yaml
+    - yarn.lock
+    - go.mod
+    - go.sum
+    - requirements.txt
+    - poetry.lock
+    - Cargo.toml
+    - pom.xml
+    - build.gradle
+  test_globs:
+    - "**/*.{test,spec}.*"
+    - "**/test/**"
+    - "**/tests/**"
+    - "**/__tests__/**"
+
+qwen:
+  enabled: true
+  protocol: compatible
+  timeout_sec: 60
+  max_diff_chars: 12000
+  base_url_env: QWEN_BASE_URL
+  api_key_env: QWEN_API_KEY
+  model_env: QWEN_MODEL
+
+notify:
+  webhook_url_env: FEISHU_WEBHOOK_URL

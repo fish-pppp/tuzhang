@@ -1,0 +1,25 @@
+# 在 GitLab 项目里创建 Pipeline schedule（建议每天上班前）。
+# 需要 CI/CD Variables: GITLAB_TOKEN, QWEN_BASE_URL, QWEN_API_KEY, QWEN_MODEL
+# 可选: FEISHU_WEBHOOK_URL；DRY_RUN=1 时只出报告不发通知。
+# 若本目录只是别的仓库子目录，把下面 script/artifacts 路径改成带 mr-daily-monitor/ 前缀。
+
+stages:
+  - digest
+
+daily_mr_digest:
+  stage: digest
+  image: node:20-bookworm
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
+      when: manual
+  script:
+    - npm ci
+    - npm run digest -- run --since yesterday --config config.yml
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - reports/*.md
+      - reports/*.json

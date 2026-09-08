@@ -1,0 +1,24 @@
+{
+  "name": "mr-daily-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitLab 每日已合入 MR 风险与功能测试简报（通义千问）",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "mrdigest": "./bin/mrdigest.js"
+  },
+  "scripts": {
+    "digest": "node bin/mrdigest.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@gitbeaker/rest": "^43.8.0",
+    "dotenv": "^16.6.1",
+    "minimatch": "^10.0.3",
+    "openai": "^4.104.0",
+    "yaml": "^2.8.1"
+  }
+}
