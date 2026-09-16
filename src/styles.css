@@ -2,8 +2,13 @@
 @import "tw-animate-css";
 
 @theme {
-  --font-sans: "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Noto Serif SC", "Noto Serif", ui-serif, Georgia, serif;
+  /* System CJK stacks — no webfont download, renders immediately on iOS/macOS/Windows/Android. */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif;
+  --font-display:
+    "Songti SC", "STSong", "Noto Serif SC", "Source Han Serif SC", "SimSun", ui-serif,
+    Georgia, serif;
 
   --color-bg: #f3eee4;
   --color-bg-elevated: #faf7f0;
