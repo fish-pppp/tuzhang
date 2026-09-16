@@ -42,6 +42,15 @@ function inviteCode(): string {
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
 }
 
+/** Postgres `unique_violation` — the only error worth retrying with a new invite code. */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === "23505"
+  );
+}
+
 async function requireMember(
   sql: Awaited<ReturnType<typeof getSql>>,
   groupId: string,
@@ -222,7 +231,10 @@ export const createGroup = createServerFn({ method: "POST" })
         `;
         inserted = true;
         break;
-      } catch {
+      } catch (err) {
+        // Only an invite-code collision deserves another roll; anything else
+        // (DB down, schema missing) must surface instead of looping 6 times.
+        if (!isUniqueViolation(err)) throw err;
         code = inviteCode();
       }
     }
@@ -333,11 +345,17 @@ export const addGroupExpense = createServerFn({ method: "POST" })
       insert into group_expenses (id, group_id, title, amount_cents, payer_id, created_by)
       values (${id}, ${data.groupId}, ${data.title}, ${data.amountCents}, ${data.payerId}, ${context.userId})
     `;
-    for (const userId of participants) {
+    try {
+      // One round-trip for all shares instead of one insert per participant.
       await sql`
         insert into group_expense_shares (expense_id, user_id)
-        values (${id}, ${userId})
+        select ${id}, unnest(${participants}::text[])
       `;
+    } catch (err) {
+      // No transaction on the shared Sql surface: undo the header row so a
+      // failed share insert can't leave an expense nobody is splitting.
+      await sql`delete from group_expenses where id = ${id}`.catch(() => undefined);
+      throw err;
     }
     return { id };
   });
