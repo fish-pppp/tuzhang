@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { friendlyError } from "@/lib/errors";
 import { joinGroup } from "@/lib/split/group-api";
 import { profileFromUser } from "@/lib/split/profile";
 
@@ -15,11 +16,15 @@ function JoinPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  // `user` is a new object each render; depend on its primitive fields so a
+  // re-render can't fire a second joinGroup for the same person.
+  const userId = user?.id ?? null;
+  const { displayName, avatarUrl } = profileFromUser(user);
 
   useEffect(() => {
-    if (isPending || !user) return;
+    if (isPending || !userId) return;
     let cancelled = false;
-    void joinGroup({ data: { code, ...profileFromUser(user) } })
+    void joinGroup({ data: { code, displayName, avatarUrl } })
       .then(async (group) => {
         if (cancelled) return;
         await queryClient.invalidateQueries({ queryKey: ["groups"] });
@@ -27,12 +32,12 @@ function JoinPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "加入失败");
+        setError(friendlyError(err, "加入失败"));
       });
     return () => {
       cancelled = true;
     };
-  }, [code, isPending, navigate, queryClient, user]);
+  }, [avatarUrl, code, displayName, isPending, navigate, queryClient, userId]);
 
   if (isPending) {
     return (

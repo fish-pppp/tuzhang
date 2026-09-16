@@ -3,6 +3,7 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { TripView } from "@/components/trip-board";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { friendlyError, isUnauthorizedError } from "@/lib/errors";
 import {
   addGroupExpense,
   leaveGroup,
@@ -25,7 +26,12 @@ function GroupPage() {
     queryKey: ["group", groupId],
     queryFn: () => loadGroup({ data: { groupId } }),
     enabled: Boolean(user) && !authPending,
-    refetchInterval: 5000,
+    // Light polling keeps everyone's balances in sync; pause it while the tab
+    // is hidden and stop hammering the server once a load has failed (the
+    // error view offers a manual retry).
+    refetchInterval: (q) => (q.state.error ? false : 5000),
+    refetchIntervalInBackground: false,
+    retry: (count, err) => !isUnauthorizedError(err) && count < 1,
   });
 
   const trip = query.data;
@@ -48,7 +54,7 @@ function GroupPage() {
   if (authPending) {
     return <PageShell>正在确认登录…</PageShell>;
   }
-  if (!user) {
+  if (!user || isUnauthorizedError(query.error)) {
     return (
       <PageShell>
         这个群组需要登录后才能进入。
@@ -68,8 +74,15 @@ function GroupPage() {
   if (query.error || !trip) {
     return (
       <PageShell>
-        {query.error instanceof Error ? query.error.message : "打不开这个群组。"}
-        <Link to="/" className="mt-3 text-sm text-primary underline-offset-4 hover:underline">
+        {friendlyError(query.error, "打不开这个群组。")}
+        <button
+          type="button"
+          onClick={() => void query.refetch()}
+          className="mt-3 text-sm text-primary underline-offset-4 hover:underline"
+        >
+          重试
+        </button>
+        <Link to="/" className="text-sm text-primary underline-offset-4 hover:underline">
           回首页
         </Link>
       </PageShell>
