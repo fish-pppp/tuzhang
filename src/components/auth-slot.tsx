@@ -25,6 +25,9 @@ export function AuthSlot() {
             {label.slice(0, 1)}
           </span>
         )}
+        <span className="hidden max-w-32 truncate text-sm font-medium sm:inline" title={label}>
+          {label}
+        </span>
         <button
           type="button"
           onClick={() => void signOut()}
