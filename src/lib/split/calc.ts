@@ -1,4 +1,5 @@
 import type { Expense, Ledger, PersonLedger, Transfer, Trip } from "./types";
+import { isActiveExpense } from "./types";
 
 export function splitShares(amountCents: number, n: number): number[] {
   if (n <= 0) return [];
@@ -30,6 +31,7 @@ export function computeLedger(trip: Trip): Ledger {
 
   let totalCents = 0;
   for (const expense of trip.expenses) {
+    if (!isActiveExpense(expense)) continue;
     const participants = expense.participantIds.filter((id) => share.has(id));
     if (participants.length === 0 || expense.amountCents <= 0) continue;
     totalCents += expense.amountCents;
@@ -123,7 +125,7 @@ export function personalBook(trip: Trip, memberId: string): PersonalBook | null 
   const me = ledger.perPerson.find((p) => p.memberId === memberId);
   if (!me) return null;
   const paidByMe: PaidByMeRow[] = trip.expenses
-    .filter((e) => e.payerId === memberId)
+    .filter((e) => isActiveExpense(e) && e.payerId === memberId)
     .map((expense) => {
       const slices = shareBreakdown(expense);
       const myShareCents = slices.find((s) => s.memberId === memberId)?.cents ?? 0;
@@ -136,7 +138,12 @@ export function personalBook(trip: Trip, memberId: string): PersonalBook | null 
       };
     });
   const INeedToChip: ShareOfMineRow[] = trip.expenses
-    .filter((e) => e.payerId !== memberId && e.participantIds.includes(memberId))
+    .filter(
+      (e) =>
+        isActiveExpense(e) &&
+        e.payerId !== memberId &&
+        e.participantIds.includes(memberId),
+    )
     .map((expense) => ({
       expense,
       myShareCents: shareForMember(expense, memberId),
@@ -161,13 +168,15 @@ export function memberBalance(
   let paidCents = 0;
   let shareCents = 0;
   for (const expense of expenses) {
+    if (!isActiveExpense(expense)) continue;
     if (expense.payerId === memberId) paidCents += expense.amountCents;
     shareCents += shareForMember(expense, memberId);
   }
+  const activeCount = expenses.filter(isActiveExpense).length;
   return {
     paidCents,
     shareCents,
     netCents: paidCents - shareCents,
-    expenseCount: expenses.length,
+    expenseCount: activeCount,
   };
 }

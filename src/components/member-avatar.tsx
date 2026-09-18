@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Member } from "@/lib/split/types";
 
@@ -21,6 +22,11 @@ export function MemberAvatar({
   className?: string;
 }) {
   const initial = member.name.slice(0, 1);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    setBroken(false);
+  }, [member.avatar]);
+  const showImage = Boolean(member.avatar) && !broken;
   return (
     <span
       className={cn(
@@ -31,12 +37,12 @@ export function MemberAvatar({
         className,
       )}
     >
-      {member.avatar ? (
+      {showImage ? (
         <img
-          src={member.avatar}
+          src={member.avatar ?? ""}
           alt=""
           className="size-full object-cover"
-          crossOrigin="anonymous"
+          onError={() => setBroken(true)}
         />
       ) : (
         <span className="grid size-full place-items-center font-medium">

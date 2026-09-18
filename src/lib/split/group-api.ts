@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
 import { memberBalance } from "./calc";
+import { normalizeDeleteReason } from "./delete-reason";
 import { newId } from "./money";
 import type { Expense, Member, Trip } from "./types";
 
@@ -86,10 +87,12 @@ async function loadGroupTrip(
     display_name: string;
     avatar_url: string | null;
   }>`
-    select user_id, display_name, avatar_url
-    from group_members
-    where group_id = ${groupId}
-    order by joined_at asc
+    select m.user_id, m.display_name,
+           coalesce(nullif(u."image", ''), m.avatar_url) as avatar_url
+    from group_members m
+    left join "user" u on u."id" = m.user_id
+    where m.group_id = ${groupId}
+    order by m.joined_at asc
   `;
   const members: Member[] = memberRows.map((m) => ({
     id: m.user_id,
@@ -103,8 +106,12 @@ async function loadGroupTrip(
     amount_cents: number;
     payer_id: string;
     created_at: string;
+    deleted_at: string | null;
+    deleted_by: string | null;
+    delete_reason: string | null;
   }>`
-    select id, title, amount_cents, payer_id, created_at::text as created_at
+    select id, title, amount_cents, payer_id, created_at::text as created_at,
+           deleted_at::text as deleted_at, deleted_by, delete_reason
     from group_expenses
     where group_id = ${groupId}
     order by created_at desc
@@ -128,6 +135,9 @@ async function loadGroupTrip(
     payerId: e.payer_id,
     participantIds: sharesByExpense.get(e.id) ?? [],
     createdAt: e.created_at,
+    deletedAt: e.deleted_at,
+    deletedBy: e.deleted_by,
+    deleteReason: e.delete_reason,
   }));
 
   return {
@@ -169,6 +179,7 @@ export const listMyGroups = createServerFn({ method: "GET" })
       from group_expenses e
       join group_members me on me.group_id = e.group_id
       where me.user_id = ${context.userId}
+        and e.deleted_at is null
     `;
     const shareRows = await sql<{ expense_id: string; user_id: string }>`
       select s.expense_id, s.user_id
@@ -176,6 +187,7 @@ export const listMyGroups = createServerFn({ method: "GET" })
       join group_expenses e on e.id = s.expense_id
       join group_members me on me.group_id = e.group_id
       where me.user_id = ${context.userId}
+        and e.deleted_at is null
     `;
     const sharesByExpense = new Map<string, string[]>();
     for (const row of shareRows) {
@@ -363,15 +375,31 @@ export const addGroupExpense = createServerFn({ method: "POST" })
 export const removeGroupExpense = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((data: unknown) =>
-    z.object({ groupId: groupIdSchema, expenseId: z.string().min(1) }).parse(data),
+    z
+      .object({
+        groupId: groupIdSchema,
+        expenseId: z.string().min(1),
+        reason: z.string(),
+      })
+      .parse(data),
   )
   .handler(async ({ context, data }) => {
+    const reason = normalizeDeleteReason(data.reason);
     const sql = await getSql();
     await requireMember(sql, data.groupId, context.userId);
-    await sql`
-      delete from group_expenses
-      where id = ${data.expenseId} and group_id = ${data.groupId}
+    const updated = await sql<{ id: string }>`
+      update group_expenses
+      set deleted_at = now(),
+          deleted_by = ${context.userId},
+          delete_reason = ${reason}
+      where id = ${data.expenseId}
+        and group_id = ${data.groupId}
+        and deleted_at is null
+      returning id
     `;
+    if (!updated[0]) {
+      throw new Error("这条账单已经删除过了");
+    }
     return { ok: true as const };
   });
 

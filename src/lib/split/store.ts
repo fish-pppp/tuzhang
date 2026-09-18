@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { cloneDemoTrip } from "./demo";
 import { newId } from "./money";
+import { normalizeDeleteReason } from "./delete-reason";
 import type { Expense, Member, Trip } from "./types";
 
 type TripState = {
@@ -13,8 +14,8 @@ type TripState = {
   selectMember: (id: string | null) => void;
   setMeId: (id: string) => void;
   renameTrip: (name: string) => void;
-  addExpense: (input: Omit<Expense, "id" | "createdAt">) => void;
-  removeExpense: (id: string) => void;
+  addExpense: (input: Omit<Expense, "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason">) => void;
+  removeExpense: (id: string, reason: string) => void;
   addMember: (name: string) => void;
   renameMember: (id: string, name: string) => void;
   removeMember: (id: string) => void;
@@ -52,13 +53,26 @@ export const useTripStore = create<TripState>()(
             ],
           },
         })),
-      removeExpense: (id) =>
-        set((s) => ({
-          trip: {
-            ...s.trip,
-            expenses: s.trip.expenses.filter((e) => e.id !== id),
-          },
-        })),
+      removeExpense: (id, reason) =>
+        set((s) => {
+          const deleteReason = normalizeDeleteReason(reason);
+          const deletedAt = new Date().toISOString();
+          return {
+            trip: {
+              ...s.trip,
+              expenses: s.trip.expenses.map((e) =>
+                e.id === id && !e.deletedAt
+                  ? {
+                      ...e,
+                      deletedAt,
+                      deletedBy: s.meId,
+                      deleteReason,
+                    }
+                  : e,
+              ),
+            },
+          };
+        }),
       addMember: (name) =>
         set((s) => {
           const trimmed = name.trim();
@@ -99,7 +113,24 @@ export const useTripStore = create<TripState>()(
       resetDemo: () =>
         set({ trip: cloneDemoTrip(), selectedMemberId: null, meId: null }),
       clearExpenses: () =>
-        set((s) => ({ trip: { ...s.trip, expenses: [] } })),
+        set((s) => {
+          const deletedAt = new Date().toISOString();
+          return {
+            trip: {
+              ...s.trip,
+              expenses: s.trip.expenses.map((e) =>
+                e.deletedAt
+                  ? e
+                  : {
+                      ...e,
+                      deletedAt,
+                      deletedBy: s.meId,
+                      deleteReason: "清空示例账单",
+                    },
+              ),
+            },
+          };
+        }),
       replaceTrip: (trip) => set({ trip, selectedMemberId: null }),
     }),
     {

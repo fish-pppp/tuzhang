@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Copy } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
+import { ProfileDialog } from "@/components/profile-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -37,6 +38,7 @@ export function GroupMembersDialog({
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
 
   async function copyInvite() {
     if (!inviteCode) return;
@@ -121,6 +123,13 @@ export function GroupMembersDialog({
                   保存
                 </Button>
               </div>
+              <button
+                type="button"
+                onClick={() => setAvatarOpen(true)}
+                className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+              >
+                更换头像
+              </button>
             </form>
           ) : null}
 
@@ -183,6 +192,7 @@ export function GroupMembersDialog({
             )
           ) : null}
         </div>
+        <ProfileDialog open={avatarOpen} onOpenChange={setAvatarOpen} />
       </DialogContent>
     </Dialog>
   );
