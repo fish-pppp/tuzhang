@@ -58,6 +58,7 @@ export function ProfileDialog({
       const { image } = await updateMyAvatar({ data: { base64 } });
       await refreshViews(image);
       setPreview(null);
+      onOpenChange(false);
     } catch (err) {
       setError(friendlyError(err, "换头像失败"));
     } finally {
