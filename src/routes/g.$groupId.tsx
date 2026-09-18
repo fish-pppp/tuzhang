@@ -82,7 +82,11 @@ function GroupPage() {
         >
           重试
         </button>
-        <Link to="/" className="text-sm text-primary underline-offset-4 hover:underline">
+        <Link
+          to="/"
+          search={{ demo: undefined }}
+          className="text-sm text-primary underline-offset-4 hover:underline"
+        >
           回首页
         </Link>
       </PageShell>
@@ -124,7 +128,8 @@ function GroupPage() {
         onLeave={() => {
           void leaveGroup({ data: { groupId } }).then(() => {
             void queryClient.invalidateQueries({ queryKey: ["groups"] });
-            void navigate({ to: "/" });
+            void queryClient.invalidateQueries({ queryKey: ["home-group"] });
+            void navigate({ to: "/", search: { demo: undefined } });
           });
         }}
       />

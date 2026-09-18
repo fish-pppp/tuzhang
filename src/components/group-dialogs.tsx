@@ -59,6 +59,7 @@ export function CreateGroupDialog({
         data: { name: trimmed, ...profileFromUser(user) },
       });
       await queryClient.invalidateQueries({ queryKey: ["groups"] });
+      await queryClient.invalidateQueries({ queryKey: ["home-group"] });
       setCreated(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");

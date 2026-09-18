@@ -60,6 +60,7 @@ function JoinPage() {
           <p className="text-sm text-owe">{error}</p>
           <Link
             to="/"
+            search={{ demo: undefined }}
             className="mt-3 inline-block text-sm text-primary underline-offset-4 hover:underline"
           >
             回首页

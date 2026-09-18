@@ -48,6 +48,7 @@ export function GroupSwitcher({
           <div className="absolute top-full left-0 z-40 mt-2 w-72 rounded-xl bg-surface p-2 shadow-card-hover">
             <Link
               to="/"
+              search={user ? { demo: true } : { demo: undefined }}
               onClick={() => setMenuOpen(false)}
               className={cn(
                 "flex items-center justify-between rounded-lg px-3 py-2.5 text-sm",
