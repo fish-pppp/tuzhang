@@ -1,0 +1,39 @@
+/**
+ * Turn server / Better Auth errors into short Chinese messages for the UI.
+ *
+ * Server functions and Better Auth report in English ("Unauthorized",
+ * "Invalid email or password"…); the app is Chinese-only, so map the common
+ * ones here and fall back to the raw message (or a caller-provided default).
+ */
+
+export function isUnauthorizedError(err: unknown): boolean {
+  return err instanceof Error && err.message === "Unauthorized";
+}
+
+const AUTH_MESSAGES: Array<[RegExp, string]> = [
+  [/user already exists|already registered/i, "这个邮箱已经注册过了，直接登录即可"],
+  [/invalid email or password|invalid password|user not found/i, "邮箱或密码不对"],
+  [/invalid email/i, "邮箱格式不对"],
+  [/password too short|at least 8/i, "密码至少 8 位"],
+  [/password too long/i, "密码太长了"],
+  [/invalid origin|forbidden/i, "登录来源校验失败：请用与 BETTER_AUTH_URL 一致的地址访问"],
+  [/failed to fetch|network|load failed/i, "网络不通，请稍后再试"],
+  [/too many requests|rate limit/i, "操作太频繁，稍等一下再试"],
+];
+
+/** Better Auth error → Chinese copy for the sign-in / sign-up form. */
+export function friendlyAuthError(message: string | undefined | null, fallback: string): string {
+  const text = (message ?? "").trim();
+  if (!text) return fallback;
+  for (const [pattern, copy] of AUTH_MESSAGES) {
+    if (pattern.test(text)) return copy;
+  }
+  return text;
+}
+
+/** Any thrown value (usually from a server function) → Chinese copy. */
+export function friendlyError(err: unknown, fallback = "出了点问题，请稍后再试"): string {
+  if (isUnauthorizedError(err)) return "登录已过期，请重新登录";
+  if (err instanceof Error && err.message) return friendlyAuthError(err.message, fallback);
+  return fallback;
+}

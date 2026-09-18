@@ -64,7 +64,7 @@ export function computeLedger(trip: Trip): Ledger {
 
 function settle(perPerson: PersonLedger[]): Transfer[] {
   const debtors = perPerson
-    .filter((p) => p.netCents < -0)
+    .filter((p) => p.netCents < 0)
     .map((p) => ({ id: p.memberId, cents: -p.netCents }))
     .sort((a, b) => b.cents - a.cents);
   const creditors = perPerson

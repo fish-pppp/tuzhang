@@ -1,0 +1,23 @@
+# 本地开发用的 Postgres。启动：docker compose up -d
+# 对应 .env 里的 DATABASE_URL=postgres://tuzhang:tuzhang@127.0.0.1:5432/tuzhang
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tuzhang-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tuzhang
+      POSTGRES_PASSWORD: tuzhang
+      POSTGRES_DB: tuzhang
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - tuzhang-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tuzhang -d tuzhang"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  tuzhang-pgdata:

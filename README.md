@@ -11,9 +11,51 @@
 
 ## 本地运行
 
+需要 Node.js ≥ 20。数据库两种选法：
+
+- **推荐：本机 Postgres**（账号、群组、账单都会持久保存）。
+- **零配置：不填 `DATABASE_URL`**，自动用内存版 PGLite —— 能跑起来，但每次重启 dev server 数据清空。
+
 ```bash
+# 1. 依赖
 npm install
-npm run dev
+
+# 2. 数据库（推荐 Docker；也可以用本机已装好的 Postgres）
+docker compose up -d          # 起一个 postgres:16，用户名/密码/库名都是 tuzhang
+# 没有 Docker 时（Ubuntu/Debian）：
+#   sudo apt install postgresql && sudo service postgresql start
+#   sudo -u postgres psql -c "create user tuzhang with password 'tuzhang' superuser;" \
+#                          -c "create database tuzhang owner tuzhang;"
+
+# 3. 环境变量
+cp .env.example .env          # 默认值已对准上面的 docker compose，可直接用
+
+# 4. 建表（幂等，可反复执行）
+npm run db:migrate
+
+# 5. 启动
+npm run dev                   # http://localhost:8080
+```
+
+打开 <http://localhost:8080> → 右上角 **登录** → 切到 **注册**（邮箱 + 至少 8 位密码）→ 回到首页 **新建** 群组 → 复制邀请码发给同行。
+
+### 本地常见问题
+
+| 现象 | 原因 / 解法 |
+| --- | --- |
+| 登录后刷新又变成未登录 | 请用 `http://localhost:8080` 访问。会话 Cookie 带 `Secure` 标志，浏览器只对 `localhost` 放行 http；用局域网 IP（如 `http://192.168.x.x:8080`）打开时 Cookie 会被丢弃。手机联调请用 https 反向代理或 `localhost` 端口转发。 |
+| 登录报「Invalid origin」 | 地址栏 origin 必须和 `.env` 里 `BETTER_AUTH_URL` 一致（含协议、端口，无末尾 `/`）。 |
+| `npm run db:migrate` 连不上 | 确认 `docker compose ps` 里 db 是 healthy；`DATABASE_URL` 的端口 / 密码和 compose 文件一致。 |
+| 重启后账号全没了 | 没配 `DATABASE_URL`，跑在内存 PGLite 上。按上面第 2、3 步接上 Postgres。 |
+| Google / X 按钮点了报错 | 没有 `GROK_AUTH_*` 密钥时属预期行为，用邮箱注册即可。 |
+
+### 检查命令
+
+```bash
+npm run typecheck   # tsc
+npm run lint        # eslint
+npm test            # node --test scripts/**/*.test.mjs
+npm run build       # vite build + db:migrate（无 DATABASE_URL 时跳过迁移）
 ```
 
 ## 部署到 Vercel

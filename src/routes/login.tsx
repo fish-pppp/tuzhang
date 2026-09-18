@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   GROK_PROVIDERS,
@@ -7,6 +7,8 @@ import {
   signIn,
 } from "@/lib/auth/client";
 import { emailAndPasswordEnabled } from "@/lib/auth/email-password";
+import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { friendlyAuthError } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,12 +26,20 @@ export const Route = createFileRoute("/login")({
 function Login() {
   const { redirect } = Route.useSearch();
   const callbackURL = redirect ?? "/";
+  const { user, isPending: sessionPending } = useCurrentUserState();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  // Already signed in (e.g. pressed Back onto /login): skip the form.
+  useEffect(() => {
+    if (!sessionPending && user && !pending) {
+      window.location.replace(callbackURL);
+    }
+  }, [callbackURL, pending, sessionPending, user]);
 
   async function onEmail(e: React.FormEvent) {
     e.preventDefault();
@@ -50,21 +60,22 @@ function Login() {
           password,
           name: name.trim(),
         });
-        if (signUpError) throw new Error(signUpError.message ?? "注册失败");
+        if (signUpError) throw new Error(friendlyAuthError(signUpError.message, "注册失败"));
       } else {
         const { error: signInError } = await authClient.signIn.email({
           email: email.trim(),
           password,
         });
-        if (signInError) throw new Error(signInError.message ?? "登录失败");
+        if (signInError) throw new Error(friendlyAuthError(signInError.message, "登录失败"));
       }
       await authClient.getSession();
       window.location.href = callbackURL;
+      // Keep the button disabled while the browser navigates away.
+      return;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登录失败");
-    } finally {
-      setPending(false);
+      setError(friendlyAuthError(err instanceof Error ? err.message : null, "登录失败"));
     }
+    setPending(false);
   }
 
   return (
