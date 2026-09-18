@@ -4,6 +4,7 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
 import { memberBalance } from "./calc";
 import { normalizeDeleteReason } from "./delete-reason";
+import { homeGroupName } from "./home-group";
 import { newId } from "./money";
 import type { Expense, Member, Trip } from "./types";
 
@@ -225,6 +226,39 @@ export const listMyGroups = createServerFn({ method: "GET" })
     });
   });
 
+async function createOwnedGroup(
+  sql: Awaited<ReturnType<typeof getSql>>,
+  userId: string,
+  name: string,
+  displayName: string,
+  avatarUrl: string | null,
+): Promise<{ id: string; inviteCode: string; name: string }> {
+  const id = newId();
+  let code = inviteCode();
+  let inserted = false;
+  for (let i = 0; i < 6; i += 1) {
+    try {
+      await sql`
+        insert into groups (id, name, invite_code, created_by)
+        values (${id}, ${name}, ${code}, ${userId})
+      `;
+      inserted = true;
+      break;
+    } catch (err) {
+      // Only an invite-code collision deserves another roll; anything else
+      // (DB down, schema missing) must surface instead of looping 6 times.
+      if (!isUniqueViolation(err)) throw err;
+      code = inviteCode();
+    }
+  }
+  if (!inserted) throw new Error("创建群组失败，请再试一次");
+  await sql`
+    insert into group_members (group_id, user_id, display_name, avatar_url)
+    values (${id}, ${userId}, ${displayName}, ${avatarUrl})
+  `;
+  return { id, inviteCode: code, name };
+}
+
 export const createGroup = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((data: unknown) =>
@@ -232,31 +266,50 @@ export const createGroup = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const id = newId();
-    let code = inviteCode();
-    let inserted = false;
-    for (let i = 0; i < 6; i += 1) {
-      try {
-        await sql`
-          insert into groups (id, name, invite_code, created_by)
-          values (${id}, ${data.name}, ${code}, ${context.userId})
-        `;
-        inserted = true;
-        break;
-      } catch (err) {
-        // Only an invite-code collision deserves another roll; anything else
-        // (DB down, schema missing) must surface instead of looping 6 times.
-        if (!isUniqueViolation(err)) throw err;
-        code = inviteCode();
-      }
-    }
-    if (!inserted) throw new Error("创建群组失败，请再试一次");
-    const avatar = data.avatarUrl ?? null;
-    await sql`
-      insert into group_members (group_id, user_id, display_name, avatar_url)
-      values (${id}, ${context.userId}, ${data.displayName}, ${avatar})
+    return createOwnedGroup(
+      sql,
+      context.userId,
+      data.name,
+      data.displayName,
+      data.avatarUrl ?? null,
+    );
+  });
+
+/** Latest group this user created, or a new `{名字}的账本` if they have none. */
+export const ensureMyHomeGroup = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const sql = await getSql();
+    const existing = await sql<{ id: string; name: string }>`
+      select g.id, g.name
+      from groups g
+      join group_members me on me.group_id = g.id
+      where me.user_id = ${context.userId}
+        and g.created_by = ${context.userId}
+      order by g.created_at desc
+      limit 1
     `;
-    return { id, inviteCode: code, name: data.name };
+    if (existing[0]) {
+      return { id: existing[0].id, name: existing[0].name, created: false };
+    }
+
+    const users = await sql<{
+      name: string | null;
+      email: string | null;
+      image: string | null;
+    }>`
+      select "name", "email", "image" from "user" where "id" = ${context.userId} limit 1
+    `;
+    const displayName =
+      users[0]?.name?.trim() || users[0]?.email?.split("@")[0] || "途友";
+    const created = await createOwnedGroup(
+      sql,
+      context.userId,
+      homeGroupName(displayName),
+      displayName,
+      users[0]?.image ?? null,
+    );
+    return { id: created.id, name: created.name, created: true };
   });
 
 export const joinGroup = createServerFn({ method: "POST" })

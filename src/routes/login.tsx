@@ -9,6 +9,7 @@ import {
 import { emailAndPasswordEnabled } from "@/lib/auth/email-password";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { friendlyAuthError } from "@/lib/errors";
+import { resolvePostLoginPath } from "@/lib/split/home-path";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,10 +37,15 @@ function Login() {
 
   // Already signed in (e.g. pressed Back onto /login): skip the form.
   useEffect(() => {
-    if (!sessionPending && user && !pending) {
-      window.location.replace(callbackURL);
-    }
-  }, [callbackURL, pending, sessionPending, user]);
+    if (sessionPending || !user || pending) return;
+    let cancelled = false;
+    void resolvePostLoginPath(redirect).then((path) => {
+      if (!cancelled) window.location.replace(path);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pending, redirect, sessionPending, user]);
 
   async function onEmail(e: React.FormEvent) {
     e.preventDefault();
@@ -69,7 +75,7 @@ function Login() {
         if (signInError) throw new Error(friendlyAuthError(signInError.message, "登录失败"));
       }
       await authClient.getSession();
-      window.location.href = callbackURL;
+      window.location.href = await resolvePostLoginPath(redirect);
       // Keep the button disabled while the browser navigates away.
       return;
     } catch (err) {
@@ -85,10 +91,10 @@ function Login() {
           途账
         </p>
         <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
-          登录后一起记账
+          登录后进入你的账本
         </h1>
         <p className="mt-2 text-sm text-muted">
-          每个人用自己的账号。建一个群、发邀请码，同行就能加入，一起记垫付和 AA。
+          每个人用自己的账号。登录后会打开你创建的分组；也可以再新建或加入别人的群。
         </p>
         <div className="mt-6 space-y-2">
           {authEnabled ? (
@@ -185,6 +191,7 @@ function Login() {
 
         <Link
           to="/"
+          search={{ demo: true }}
           className="mt-5 inline-flex text-sm text-muted underline-offset-4 hover:text-fg hover:underline"
         >
           先不登录，看示例
