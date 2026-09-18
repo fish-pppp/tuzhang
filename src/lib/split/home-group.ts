@@ -15,3 +15,10 @@ export function pickHomeGroup<T extends { createdBy: string }>(
 ): T | undefined {
   return groups.find((g) => g.createdBy === userId);
 }
+
+/** `/?demo=1` stays on the local sample; the router may pass 1 as a number. */
+export function parseDemoFlag(value: unknown): true | undefined {
+  return value === true || value === 1 || value === "1" || value === "true"
+    ? true
+    : undefined;
+}

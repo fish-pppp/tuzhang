@@ -13,6 +13,12 @@ function pickHomeGroup(groups, userId) {
   return groups.find((g) => g.createdBy === userId);
 }
 
+function parseDemoFlag(value) {
+  return value === true || value === 1 || value === "1" || value === "true"
+    ? true
+    : undefined;
+}
+
 test("home group name uses the person's name", () => {
   assert.equal(homeGroupName(null), "我的账本");
   assert.equal(homeGroupName("  "), "我的账本");
@@ -29,4 +35,13 @@ test("home group is the newest one the user created, not one they only joined", 
   ];
   assert.equal(pickHomeGroup(groups, "me")?.id, "mine-new");
   assert.equal(pickHomeGroup(groups, "nobody"), undefined);
+});
+
+test("demo flag accepts the query forms the router actually sends", () => {
+  assert.equal(parseDemoFlag(1), true);
+  assert.equal(parseDemoFlag("1"), true);
+  assert.equal(parseDemoFlag(true), true);
+  assert.equal(parseDemoFlag("true"), true);
+  assert.equal(parseDemoFlag(undefined), undefined);
+  assert.equal(parseDemoFlag("0"), undefined);
 });

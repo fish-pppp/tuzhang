@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { HomePage } from "@/components/home-page";
+import { parseDemoFlag } from "@/lib/split/home-group";
 
 export const Route = createFileRoute("/")({
   validateSearch: (raw: Record<string, unknown>) => ({
-    demo: raw.demo === true || raw.demo === "1" || raw.demo === "true" ? true : undefined,
+    demo: parseDemoFlag(raw.demo),
   }),
   component: Home,
 });
