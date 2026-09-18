@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as GGroupIdRouteImport } from './routes/g.$groupId'
 import { Route as JoinCodeRouteImport } from './routes/join.$code'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiAvatarUserIdRouteImport } from './routes/api/avatar.$userId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +41,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAvatarUserIdRoute = ApiAvatarUserIdRouteImport.update({
+  id: '/api/avatar/$userId',
+  path: '/api/avatar/$userId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/g/$groupId': typeof GGroupIdRoute
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/avatar/$userId': typeof ApiAvatarUserIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/g/$groupId': typeof GGroupIdRoute
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/avatar/$userId': typeof ApiAvatarUserIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,14 +70,33 @@ export interface FileRoutesById {
   '/g/$groupId': typeof GGroupIdRoute
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/avatar/$userId': typeof ApiAvatarUserIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/g/$groupId' | '/join/$code' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/g/$groupId'
+    | '/join/$code'
+    | '/api/auth/$'
+    | '/api/avatar/$userId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/g/$groupId' | '/join/$code' | '/api/auth/$'
+  to:
+    | '/'
+    | '/login'
+    | '/g/$groupId'
+    | '/join/$code'
+    | '/api/auth/$'
+    | '/api/avatar/$userId'
   id:
-    '__root__' | '/' | '/login' | '/g/$groupId' | '/join/$code' | '/api/auth/$'
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/g/$groupId'
+    | '/join/$code'
+    | '/api/auth/$'
+    | '/api/avatar/$userId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -78,6 +105,7 @@ export interface RootRouteChildren {
   GGroupIdRoute: typeof GGroupIdRoute
   JoinCodeRoute: typeof JoinCodeRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiAvatarUserIdRoute: typeof ApiAvatarUserIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -117,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/avatar/$userId': {
+      id: '/api/avatar/$userId'
+      path: '/api/avatar/$userId'
+      fullPath: '/api/avatar/$userId'
+      preLoaderRoute: typeof ApiAvatarUserIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -126,6 +161,7 @@ const rootRouteChildren: RootRouteChildren = {
   GGroupIdRoute: GGroupIdRoute,
   JoinCodeRoute: JoinCodeRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiAvatarUserIdRoute: ApiAvatarUserIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Copy, Plus, RotateCcw, Users } from "lucide-react";
 import { AddExpenseDialog } from "@/components/add-expense-dialog";
 import { AuthSlot } from "@/components/auth-slot";
+import { DeleteExpenseDialog } from "@/components/delete-expense-dialog";
 import { GroupMembersDialog } from "@/components/group-members-dialog";
 import { GroupSwitcher } from "@/components/group-switcher";
 import { MemberAvatar } from "@/components/member-avatar";
@@ -15,7 +16,7 @@ import { computeLedger, expenseInvolves } from "@/lib/split/calc";
 import { formatMoney } from "@/lib/split/money";
 import { useTripStore } from "@/lib/split/store";
 import { useTripSync } from "@/lib/split/use-trip-sync";
-import type { Expense, Trip } from "@/lib/split/types";
+import { isActiveExpense, type Expense, type Trip } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
 
 export type TripViewProps = {
@@ -26,8 +27,10 @@ export type TripViewProps = {
   groupId?: string;
   createdBy?: string;
   onRename: (name: string) => void;
-  onAddExpense: (input: Omit<Expense, "id" | "createdAt">) => void | Promise<void>;
-  onRemoveExpense: (id: string) => void | Promise<void>;
+  onAddExpense: (
+    input: Omit<Expense, "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason">,
+  ) => void | Promise<void>;
+  onRemoveExpense: (id: string, reason: string) => void | Promise<void>;
   onSetMe?: (id: string) => void;
   onLeave?: () => void;
   onUpdateMyName?: (name: string) => void | Promise<void>;
@@ -47,10 +50,12 @@ export function TripView({
   onUpdateMyName,
 }: TripViewProps) {
   const [tab, setTab] = useState<"all" | "mine">("all");
+  const [billScope, setBillScope] = useState<"all" | "mine">("all");
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(meId);
   const [copied, setCopied] = useState(false);
+  const [deleting, setDeleting] = useState<Expense | null>(null);
 
   const ledger = useMemo(() => computeLedger(trip), [trip]);
   const byId = useMemo(
@@ -66,12 +71,23 @@ export function TripView({
       ? Math.round(ledger.totalCents / trip.members.length)
       : 0;
 
-  const focusId = tab === "mine" ? meId : selectedMemberId;
-  const visibleExpenses = focusId
-    ? trip.expenses.filter((e) => expenseInvolves(e, focusId))
-    : trip.expenses;
-  const selectedName = focusId ? memberMap[focusId]?.name : null;
-  const emptyGroup = variant === "group" && trip.expenses.length === 0;
+  const activeExpenses = trip.expenses.filter(isActiveExpense);
+  const visibleExpenses =
+    billScope === "mine"
+      ? meId
+        ? activeExpenses.filter((e) => expenseInvolves(e, meId))
+        : []
+      : activeExpenses;
+  const deletedExpenses = trip.expenses.filter((e) => !isActiveExpense(e));
+  const visibleDeleted =
+    billScope === "mine"
+      ? meId
+        ? deletedExpenses.filter(
+            (e) => expenseInvolves(e, meId) || e.deletedBy === meId,
+          )
+        : []
+      : deletedExpenses;
+  const emptyGroup = variant === "group" && activeExpenses.length === 0;
 
   async function copyInvite() {
     if (!inviteCode) return;
@@ -348,22 +364,37 @@ export function TripView({
 
       {tab === "all" ? (
         <section className="mt-4 rounded-2xl bg-surface p-4 shadow-card lg:p-5">
-          <div className="mb-4 flex items-center justify-between gap-2">
-            <h2 className="font-display text-lg font-semibold">
-              账单
-              {selectedName ? (
-                <span className="ml-2 text-sm font-normal text-muted">
-                  · {selectedName} 相关
-                </span>
-              ) : null}
-            </h2>
-            {variant === "demo" ? <DemoBillActions /> : null}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-display text-lg font-semibold">账单</h2>
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-full bg-chip p-0.5">
+                <BillScopeButton
+                  active={billScope === "all"}
+                  onClick={() => setBillScope("all")}
+                >
+                  全部账单
+                </BillScopeButton>
+                <BillScopeButton
+                  active={billScope === "mine"}
+                  onClick={() => setBillScope("mine")}
+                >
+                  与我相关
+                </BillScopeButton>
+              </div>
+              {variant === "demo" ? <DemoBillActions /> : null}
+            </div>
           </div>
-          {visibleExpenses.length === 0 ? (
+          {billScope === "mine" && !meId ? (
             <p className="py-8 text-center text-sm text-muted">
-              {trip.expenses.length === 0
+              先在上面点「这是我」，或登录后就能只看和你有关的账单。
+            </p>
+          ) : visibleExpenses.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted">
+              {activeExpenses.length === 0
                 ? "还没有支出。点右下角记一笔。"
-                : "这个人暂时没有相关账单。"}
+                : billScope === "mine"
+                  ? "没有和你相关的账单。"
+                  : "暂时没有账单。"}
             </p>
           ) : (
             <ul className="divide-y divide-border">
@@ -392,24 +423,31 @@ export function TripView({
                           </span>
                         )}
                       </p>
-                      <div className="mt-2 flex -space-x-1.5">
-                        {expense.participantIds.slice(0, 8).map((id) => {
+                      <ul className="mt-2 flex flex-wrap gap-2">
+                        {expense.participantIds.map((id) => {
                           const m = memberMap[id];
                           if (!m) return null;
                           return (
-                            <MemberAvatar
+                            <li
                               key={id}
-                              member={m}
-                              size="sm"
-                              className="size-6 outline-surface"
-                            />
+                              className="flex w-12 flex-col items-center gap-0.5"
+                            >
+                              <MemberAvatar
+                                member={m}
+                                size="sm"
+                                className="size-7 outline-surface"
+                              />
+                              <span className="w-full truncate text-center text-[11px] leading-tight text-muted">
+                                {m.name}
+                              </span>
+                            </li>
                           );
                         })}
-                      </div>
+                      </ul>
                     </div>
                     <button
                       type="button"
-                      onClick={() => void onRemoveExpense(expense.id)}
+                      onClick={() => setDeleting(expense)}
                       className="mt-1 min-h-10 text-xs text-subtle hover:text-owe"
                     >
                       删除
@@ -419,6 +457,45 @@ export function TripView({
               })}
             </ul>
           )}
+          {tab === "all" && visibleDeleted.length > 0 ? (
+            <div className="mt-6 border-t border-border pt-4">
+              <h3 className="mb-1 font-display text-base font-semibold">删除记录</h3>
+              <p className="mb-3 text-xs text-muted">
+                已删除的账单不计入结余，但会留下原因，方便以后对账。
+              </p>
+              <ul className="divide-y divide-border">
+                {visibleDeleted.map((expense) => {
+                  const payer = memberMap[expense.payerId];
+                  const deleter = expense.deletedBy
+                    ? memberMap[expense.deletedBy]
+                    : null;
+                  return (
+                    <li key={expense.id} className="py-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <p className="truncate text-sm text-muted line-through">
+                          {expense.title}
+                        </p>
+                        <p className="shrink-0 text-sm text-subtle tabular-nums line-through">
+                          {formatMoney(expense.amountCents)}
+                        </p>
+                      </div>
+                      <p className="mt-1 text-xs text-muted">
+                        {payer?.name ?? "未知"} 付 · {expense.participantIds.length} 人 AA
+                      </p>
+                      <p className="mt-1.5 text-sm">
+                        <span className="text-owe">删除原因：</span>
+                        {expense.deleteReason || "未填写"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-subtle">
+                        {deleter?.name ?? (expense.deletedBy ? "成员" : "有人")}
+                        {" "}删于 {formatDeletedAt(expense.deletedAt)}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -429,7 +506,7 @@ export function TripView({
           : "群里每个人登录后都能记账，结余会一起更新。"}
       </p>
 
-      {!expenseOpen && !membersOpen && (
+      {!expenseOpen && !membersOpen && !deleting && (
         <Button
           type="button"
           onClick={() => setExpenseOpen(true)}
@@ -447,6 +524,14 @@ export function TripView({
         defaultPayerId={meId ?? selectedMemberId ?? trip.members[0]?.id}
         onAdd={onAddExpense}
       />
+      <DeleteExpenseDialog
+        expense={deleting}
+        onClose={() => setDeleting(null)}
+        onConfirm={(reason) => {
+          if (!deleting) return;
+          return onRemoveExpense(deleting.id, reason);
+        }}
+      />
       {variant === "demo" ? (
         <MembersDialog open={membersOpen} onOpenChange={setMembersOpen} />
       ) : (
@@ -462,6 +547,42 @@ export function TripView({
         />
       )}
     </div>
+  );
+}
+
+function formatDeletedAt(iso: string | null | undefined): string {
+  if (!iso) return "刚才";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "刚才";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Shanghai",
+  }).format(date);
+}
+
+function BillScopeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "h-8 rounded-full px-3 text-xs font-medium transition-colors",
+        active ? "bg-surface text-fg shadow-card" : "text-muted hover:text-fg",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

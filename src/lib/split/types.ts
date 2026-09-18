@@ -11,7 +11,15 @@ export type Expense = {
   payerId: string;
   participantIds: string[];
   createdAt: string;
+  /** Set when the bill is soft-deleted; omitted/empty means still active. */
+  deletedAt?: string | null;
+  deletedBy?: string | null;
+  deleteReason?: string | null;
 };
+
+export function isActiveExpense(expense: Expense): boolean {
+  return !expense.deletedAt;
+}
 
 export type Trip = {
   id: string;

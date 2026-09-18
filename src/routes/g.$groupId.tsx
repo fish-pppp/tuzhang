@@ -112,8 +112,8 @@ function GroupPage() {
           await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
           await queryClient.invalidateQueries({ queryKey: ["groups"] });
         }}
-        onRemoveExpense={async (expenseId) => {
-          await removeGroupExpense({ data: { groupId, expenseId } });
+        onRemoveExpense={async (expenseId, reason) => {
+          await removeGroupExpense({ data: { groupId, expenseId, reason } });
           await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
           await queryClient.invalidateQueries({ queryKey: ["groups"] });
         }}
