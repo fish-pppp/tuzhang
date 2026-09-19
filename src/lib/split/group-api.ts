@@ -5,6 +5,7 @@ import { getSql } from "@/lib/db";
 import { memberBalance } from "./calc";
 import { normalizeDeleteReason } from "./delete-reason";
 import { homeGroupName } from "./home-group";
+import { assertCanRemoveMember } from "./member-rules";
 import { newId } from "./money";
 import type { Expense, Member, Trip } from "./types";
 
@@ -23,6 +24,8 @@ export type GroupSummary = {
 export type GroupPayload = Trip & {
   inviteCode: string;
   createdBy: string;
+  /** Soft-removed people — not in `members` / 结余, but history still shows their names. */
+  formerMembers: Member[];
 };
 
 const nameSchema = z.string().trim().min(1).max(80);
@@ -60,7 +63,9 @@ async function requireMember(
 ) {
   const rows = await sql<{ user_id: string }>`
     select user_id from group_members
-    where group_id = ${groupId} and user_id = ${userId}
+    where group_id = ${groupId}
+      and user_id = ${userId}
+      and removed_at is null
     limit 1
   `;
   if (!rows[0]) {
@@ -87,19 +92,27 @@ async function loadGroupTrip(
     user_id: string;
     display_name: string;
     avatar_url: string | null;
+    removed_at: string | null;
   }>`
     select m.user_id, m.display_name,
-           coalesce(nullif(u."image", ''), m.avatar_url) as avatar_url
+           coalesce(nullif(u."image", ''), m.avatar_url) as avatar_url,
+           m.removed_at::text as removed_at
     from group_members m
     left join "user" u on u."id" = m.user_id
     where m.group_id = ${groupId}
     order by m.joined_at asc
   `;
-  const members: Member[] = memberRows.map((m) => ({
-    id: m.user_id,
-    name: m.display_name,
-    avatar: m.avatar_url,
-  }));
+  const members: Member[] = [];
+  const formerMembers: Member[] = [];
+  for (const m of memberRows) {
+    const person: Member = {
+      id: m.user_id,
+      name: m.display_name,
+      avatar: m.avatar_url,
+    };
+    if (m.removed_at) formerMembers.push(person);
+    else members.push(person);
+  }
 
   const expenseRows = await sql<{
     id: string;
@@ -147,6 +160,7 @@ async function loadGroupTrip(
     inviteCode: group.invite_code,
     createdBy: group.created_by,
     members,
+    formerMembers,
     expenses,
   };
 }
@@ -163,10 +177,12 @@ export const listMyGroups = createServerFn({ method: "GET" })
       member_count: number;
     }>`
       select g.id, g.name, g.invite_code, g.created_by,
-             (select count(*)::int from group_members m where m.group_id = g.id) as member_count
+             (select count(*)::int from group_members m
+               where m.group_id = g.id and m.removed_at is null) as member_count
       from groups g
       join group_members me on me.group_id = g.id
       where me.user_id = ${context.userId}
+        and me.removed_at is null
       order by g.created_at desc
     `;
 
@@ -180,6 +196,7 @@ export const listMyGroups = createServerFn({ method: "GET" })
       from group_expenses e
       join group_members me on me.group_id = e.group_id
       where me.user_id = ${context.userId}
+        and me.removed_at is null
         and e.deleted_at is null
     `;
     const shareRows = await sql<{ expense_id: string; user_id: string }>`
@@ -188,6 +205,7 @@ export const listMyGroups = createServerFn({ method: "GET" })
       join group_expenses e on e.id = s.expense_id
       join group_members me on me.group_id = e.group_id
       where me.user_id = ${context.userId}
+        and me.removed_at is null
         and e.deleted_at is null
     `;
     const sharesByExpense = new Map<string, string[]>();
@@ -285,6 +303,7 @@ export const ensureMyHomeGroup = createServerFn({ method: "POST" })
       from groups g
       join group_members me on me.group_id = g.id
       where me.user_id = ${context.userId}
+        and me.removed_at is null
         and g.created_by = ${context.userId}
       order by g.created_at desc
       limit 1
@@ -331,7 +350,13 @@ export const joinGroup = createServerFn({ method: "POST" })
       values (${group.id}, ${context.userId}, ${data.displayName}, ${avatar})
       on conflict (group_id, user_id) do update
         set display_name = excluded.display_name,
-            avatar_url = excluded.avatar_url
+            avatar_url = excluded.avatar_url,
+            removed_at = null,
+            removed_by = null,
+            joined_at = case
+              when group_members.removed_at is not null then now()
+              else group_members.joined_at
+            end
     `;
     return { id: group.id, name: group.name };
   });
@@ -397,7 +422,8 @@ export const addGroupExpense = createServerFn({ method: "POST" })
     const sql = await getSql();
     await requireMember(sql, data.groupId, context.userId);
     const members = await sql<{ user_id: string }>`
-      select user_id from group_members where group_id = ${data.groupId}
+      select user_id from group_members
+      where group_id = ${data.groupId} and removed_at is null
     `;
     const allowed = new Set(members.map((m) => m.user_id));
     if (!allowed.has(data.payerId)) throw new Error("付款人不在群组里");
@@ -456,6 +482,44 @@ export const removeGroupExpense = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const removeGroupMember = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: unknown) =>
+    z
+      .object({
+        groupId: groupIdSchema,
+        userId: z.string().min(1).max(80),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const groups = await sql<{ created_by: string }>`
+      select created_by from groups where id = ${data.groupId} limit 1
+    `;
+    const group = groups[0];
+    if (!group) throw new Error("群组不存在");
+    assertCanRemoveMember({
+      actorId: context.userId,
+      ownerId: group.created_by,
+      targetId: data.userId,
+    });
+    await requireMember(sql, data.groupId, context.userId);
+    const updated = await sql<{ user_id: string }>`
+      update group_members
+      set removed_at = now(),
+          removed_by = ${context.userId}
+      where group_id = ${data.groupId}
+        and user_id = ${data.userId}
+        and removed_at is null
+      returning user_id
+    `;
+    if (!updated[0]) {
+      throw new Error("对方已经不在这个群里");
+    }
+    return { ok: true as const };
+  });
+
 export const leaveGroup = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((data: unknown) => z.object({ groupId: groupIdSchema }).parse(data))
@@ -467,7 +531,8 @@ export const leaveGroup = createServerFn({ method: "POST" })
       where group_id = ${data.groupId} and user_id = ${context.userId}
     `;
     const leftover = await sql<{ n: number }>`
-      select count(*)::int as n from group_members where group_id = ${data.groupId}
+      select count(*)::int as n from group_members
+      where group_id = ${data.groupId} and removed_at is null
     `;
     if ((leftover[0]?.n ?? 0) === 0) {
       await sql`delete from groups where id = ${data.groupId}`;
