@@ -9,6 +9,7 @@ import {
   leaveGroup,
   loadGroup,
   removeGroupExpense,
+  removeGroupMember,
   renameGroup,
   updateMyName,
 } from "@/lib/split/group-api";
@@ -102,6 +103,7 @@ function GroupPage() {
         inviteCode={trip.inviteCode}
         groupId={groupId}
         createdBy={trip.createdBy}
+        formerMembers={trip.formerMembers}
         onRename={setDraftName}
         onAddExpense={async (input) => {
           await addGroupExpense({
@@ -131,6 +133,11 @@ function GroupPage() {
             void queryClient.invalidateQueries({ queryKey: ["home-group"] });
             void navigate({ to: "/", search: { demo: undefined } });
           });
+        }}
+        onRemoveMember={async (userId) => {
+          await removeGroupMember({ data: { groupId, userId } });
+          await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
+          await queryClient.invalidateQueries({ queryKey: ["groups"] });
         }}
       />
     </main>

@@ -16,7 +16,7 @@ import { computeLedger, expenseInvolves } from "@/lib/split/calc";
 import { formatMoney } from "@/lib/split/money";
 import { useTripStore } from "@/lib/split/store";
 import { useTripSync } from "@/lib/split/use-trip-sync";
-import { isActiveExpense, type Expense, type Trip } from "@/lib/split/types";
+import { isActiveExpense, type Expense, type Member, type Trip } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
 
 export type TripViewProps = {
@@ -26,6 +26,7 @@ export type TripViewProps = {
   inviteCode?: string;
   groupId?: string;
   createdBy?: string;
+  formerMembers?: Member[];
   onRename: (name: string) => void;
   onAddExpense: (
     input: Omit<Expense, "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason">,
@@ -34,6 +35,7 @@ export type TripViewProps = {
   onSetMe?: (id: string) => void;
   onLeave?: () => void;
   onUpdateMyName?: (name: string) => void | Promise<void>;
+  onRemoveMember?: (userId: string) => void | Promise<void>;
 };
 
 export function TripView({
@@ -42,12 +44,14 @@ export function TripView({
   variant,
   inviteCode,
   createdBy,
+  formerMembers,
   onRename,
   onAddExpense,
   onRemoveExpense,
   onSetMe,
   onLeave,
   onUpdateMyName,
+  onRemoveMember,
 }: TripViewProps) {
   const [tab, setTab] = useState<"all" | "mine">("all");
   const [billScope, setBillScope] = useState<"all" | "mine">("all");
@@ -63,8 +67,11 @@ export function TripView({
     [ledger],
   );
   const memberMap = useMemo(
-    () => Object.fromEntries(trip.members.map((m) => [m.id, m])),
-    [trip.members],
+    () =>
+      Object.fromEntries(
+        [...trip.members, ...(formerMembers ?? [])].map((m) => [m.id, m]),
+      ),
+    [formerMembers, trip.members],
   );
   const avgCents =
     trip.members.length > 0
@@ -544,6 +551,7 @@ export function TripView({
           createdBy={createdBy}
           onUpdateMyName={onUpdateMyName}
           onLeave={onLeave}
+          onRemoveMember={onRemoveMember}
         />
       )}
     </div>

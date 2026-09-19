@@ -23,6 +23,7 @@ export function GroupMembersDialog({
   createdBy,
   onUpdateMyName,
   onLeave,
+  onRemoveMember,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -32,13 +33,18 @@ export function GroupMembersDialog({
   createdBy?: string;
   onUpdateMyName?: (name: string) => void | Promise<void>;
   onLeave?: () => void;
+  onRemoveMember?: (userId: string) => void | Promise<void>;
 }) {
   const me = members.find((m) => m.id === meId);
   const [name, setName] = useState(me?.name ?? "");
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const isOwner = Boolean(meId && createdBy && meId === createdBy);
 
   async function copyInvite() {
     if (!inviteCode) return;
@@ -73,6 +79,8 @@ export function GroupMembersDialog({
       onOpenChange={(next) => {
         if (!next) {
           setConfirmLeave(false);
+          setConfirmRemoveId(null);
+          setRemoveError(null);
           setName(me?.name ?? "");
         } else {
           setName(me?.name ?? "");
@@ -133,26 +141,91 @@ export function GroupMembersDialog({
             </form>
           ) : null}
 
+          {removeError ? <p className="text-sm text-owe">{removeError}</p> : null}
+
           <ul className="space-y-2">
-            {members.map((m) => (
-              <li
-                key={m.id}
-                className="flex items-center gap-3 rounded-lg bg-bg-elevated px-3 py-2"
-              >
-                <MemberAvatar member={m} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {m.name}
-                    {m.id === meId ? (
-                      <span className="ml-1 font-normal text-muted">我</span>
+            {members.map((m) => {
+              const canRemove =
+                Boolean(onRemoveMember) && isOwner && m.id !== meId;
+              return (
+                <li
+                  key={m.id}
+                  className="flex items-center gap-3 rounded-lg bg-bg-elevated px-3 py-2"
+                >
+                  <MemberAvatar member={m} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">
+                      {m.name}
+                      {m.id === meId ? (
+                        <span className="ml-1 font-normal text-muted">我</span>
+                      ) : null}
+                    </p>
+                    {m.id === createdBy ? (
+                      <p className="text-xs text-subtle">创建者</p>
                     ) : null}
-                  </p>
-                  {m.id === createdBy ? (
-                    <p className="text-xs text-subtle">创建者</p>
+                    {confirmRemoveId === m.id ? (
+                      <p className="mt-1 text-xs text-muted">
+                        移出后不能再看这个群或记账。历史账单会保留，结余不再计算此人。
+                      </p>
+                    ) : null}
+                  </div>
+                  {canRemove ? (
+                    confirmRemoveId === m.id ? (
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={removing}
+                          onClick={() => setConfirmRemoveId(null)}
+                        >
+                          取消
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          disabled={removing}
+                          onClick={() => {
+                            void (async () => {
+                              if (!onRemoveMember) return;
+                              setRemoving(true);
+                              setRemoveError(null);
+                              try {
+                                await onRemoveMember(m.id);
+                                setConfirmRemoveId(null);
+                              } catch (err) {
+                                setRemoveError(
+                                  err instanceof Error
+                                    ? err.message
+                                    : "移出失败",
+                                );
+                              } finally {
+                                setRemoving(false);
+                              }
+                            })();
+                          }}
+                        >
+                          {removing ? "移出中…" : "确认移出"}
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs text-muted hover:text-owe"
+                        onClick={() => {
+                          setConfirmLeave(false);
+                          setConfirmRemoveId(m.id);
+                          setRemoveError(null);
+                        }}
+                      >
+                        移出
+                      </button>
+                    )
                   ) : null}
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
 
           {onLeave ? (
@@ -184,7 +257,10 @@ export function GroupMembersDialog({
             ) : (
               <button
                 type="button"
-                onClick={() => setConfirmLeave(true)}
+                onClick={() => {
+                  setConfirmRemoveId(null);
+                  setConfirmLeave(true);
+                }}
                 className="h-11 text-sm text-muted hover:text-owe"
               >
                 退出群组
