@@ -21,14 +21,16 @@
  * `@/lib/auth/middleware`.
  */
 import { betterAuth } from "better-auth";
-import { bearer } from "better-auth/plugins";
+import { bearer, emailOTP } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
 import { ensureDbReady, getPglite } from "../db";
 import { emailAndPasswordEnabled } from "./email-password";
+import { RESET_OTP_LENGTH, RESET_OTP_SECONDS } from "./otp-mail.mjs";
 import { pgliteDialect } from "./pglite-dialect";
+import { sendPasswordResetOtp } from "./send-mail";
 import { PREVIEW_ALLOWED_HOSTS } from "./preview";
 import {
   LOCAL_DEV_ORIGINS,
@@ -147,7 +149,9 @@ export const auth = betterAuth({
   session: { cookieCache: { enabled: true, maxAge: 300 } },
 
   // Local email/password — toggled only via `./email-password` (not a plugin).
-  ...(emailAndPasswordEnabled ? { emailAndPassword: { enabled: true } } : {}),
+  ...(emailAndPasswordEnabled
+    ? { emailAndPassword: { enabled: true, revokeSessionsOnPasswordReset: true } }
+    : {}),
 
   // `__Host-` prefixed cookies: the browser REFUSES any same-named cookie that
   // carries a `Domain` attribute, so a sibling `*.grok.me` app cannot "toss" a
@@ -175,6 +179,27 @@ export const auth = betterAuth({
     // Authorization header is present, so the cookie path (deployed apps) is
     // unaffected.
     bearer(),
+
+    // Email OTP is only used to reset a forgotten password (6-digit code).
+    // Sign-in / sign-up stay email+password; other OTP types are rejected.
+    ...(emailAndPasswordEnabled
+      ? [
+          emailOTP({
+            otpLength: RESET_OTP_LENGTH,
+            expiresIn: RESET_OTP_SECONDS,
+            allowedAttempts: 5,
+            storeOTP: "hashed",
+            disableSignUp: true,
+            sendVerificationOnSignUp: false,
+            async sendVerificationOTP({ email, otp, type }) {
+              if (type !== "forget-password") {
+                throw new Error("Unsupported OTP type");
+              }
+              await sendPasswordResetOtp({ email, otp });
+            },
+          }),
+        ]
+      : []),
 
     // Bridges Better Auth's Set-Cookie into TanStack Start responses. MUST be
     // last so it runs after every other plugin's hooks.

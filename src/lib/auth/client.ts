@@ -1,3 +1,4 @@
+import { emailOTPClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 
 /**
@@ -9,6 +10,7 @@ import { createAuthClient } from "better-auth/react";
  * auth) no token is stored, so nothing changes.
  */
 export const authClient = createAuthClient({
+  plugins: [emailOTPClient()],
   fetchOptions: {
     onRequest(ctx) {
       const token = getBearerToken();
@@ -17,6 +19,22 @@ export const authClient = createAuthClient({
     },
   },
 });
+
+/** Send a 6-digit reset code to `email` (always looks successful if the address is unknown). */
+export async function requestPasswordResetCode(email: string): Promise<void> {
+  const { error } = await authClient.emailOtp.requestPasswordReset({ email });
+  if (error) throw new Error(error.message || "发送验证码失败");
+}
+
+/** Set a new password after the user types the email OTP. */
+export async function resetPasswordWithCode(input: {
+  email: string;
+  otp: string;
+  password: string;
+}): Promise<void> {
+  const { error } = await authClient.emailOtp.resetPassword(input);
+  if (error) throw new Error(error.message || "改密码失败");
+}
 
 /**
  * True when sign-in UI should be shown. On by default; set

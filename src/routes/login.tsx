@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { ForgotPasswordForm } from "@/components/forgot-password-form";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { authClient, authEnabled } from "@/lib/auth/client";
 import { emailAndPasswordEnabled } from "@/lib/auth/email-password";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { friendlyAuthError } from "@/lib/errors";
 import { resolvePostLoginPath } from "@/lib/split/home-path";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (raw: Record<string, unknown>) => ({
@@ -22,13 +23,14 @@ export const Route = createFileRoute("/login")({
 function Login() {
   const { redirect } = Route.useSearch();
   const { user, isPending: sessionPending } = useCurrentUserState();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const emailLoginOn = authEnabled && emailAndPasswordEnabled;
+  const forgot = mode === "forgot";
 
   // Already signed in (e.g. pressed Back onto /login): skip the form.
   useEffect(() => {
@@ -86,13 +88,25 @@ function Login() {
           途账
         </p>
         <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
-          登录后进入你的账本
+          {forgot ? "找回密码" : "登录后进入你的账本"}
         </h1>
         <p className="mt-2 text-sm text-muted">
-          用邮箱注册或登录。登录后会打开你创建的分组；也可以再新建或加入别人的群。
+          {forgot
+            ? "输入邮箱，我们会发 6 位验证码。用验证码就能设新密码。"
+            : "用邮箱注册或登录。登录后会打开你创建的分组；也可以再新建或加入别人的群。"}
         </p>
 
-        {emailLoginOn ? (
+        {emailLoginOn && forgot ? (
+          <ForgotPasswordForm
+            email={email}
+            onEmailChange={setEmail}
+            onBack={() => {
+              setMode("signin");
+              setError(null);
+              setPassword("");
+            }}
+          />
+        ) : emailLoginOn ? (
           <div className="mt-6">
             <div className="mb-3 flex rounded-full bg-chip p-1">
               <button
@@ -144,7 +158,21 @@ function Login() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password">密码</Label>
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="password">密码</Label>
+                  {mode === "signin" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode("forgot");
+                        setError(null);
+                      }}
+                      className="text-xs text-muted underline-offset-4 hover:text-fg hover:underline"
+                    >
+                      忘记密码
+                    </button>
+                  ) : null}
+                </div>
                 <Input
                   id="password"
                   type="password"
