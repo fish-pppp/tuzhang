@@ -4,12 +4,68 @@ export const RESET_OTP_MINUTES = 10;
 export const RESET_OTP_SECONDS = RESET_OTP_MINUTES * 60;
 export const RESET_OTP_LENGTH = 6;
 
+const EMAIL_ADDR = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+
 /** Read an env var, treating empty/whitespace as unset. Strips wrapping quotes. */
 export function envTrim(env, key) {
   const value = env[key]?.trim();
   if (!value) return undefined;
   const unquoted = value.replace(/^(['"])(.*)\1$/, "$2").trim();
   return unquoted || undefined;
+}
+
+/**
+ * Resend only accepts `email@domain` or `Name <email@domain>`.
+ * Vercel / HTML forms often eat `<noreply@…>` and leave just the display name.
+ */
+export function normalizeEmailFrom(from, env = {}) {
+  if (!from) return from;
+  let value = String(from)
+    .trim()
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*60;/g, "<")
+    .replace(/&#0*62;/g, ">")
+    .replace(/[＜〈]/g, "<")
+    .replace(/[＞〉]/g, ">");
+  value = value.replace(/^(['"])(.*)\1$/, "$2").trim();
+
+  const angled = value.match(/^(.*?)<\s*([^<>@\s]+@[^<>@\s]+)\s*>\s*$/);
+  if (angled) {
+    const name = angled[1].trim().replace(/^["']|["']$/g, "");
+    const email = angled[2].trim();
+    return name ? `${name} <${email}>` : email;
+  }
+
+  const loose = value.match(/^(.*?)\s+([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)\s*$/);
+  if (loose?.[1]?.trim()) {
+    return `${loose[1].trim()} <${loose[2]}>`;
+  }
+
+  if (EMAIL_ADDR.test(value)) return value;
+
+  const fallback = fallbackNoreply(env);
+  if (fallback && !value.includes("@")) {
+    return `${value} <${fallback}>`;
+  }
+
+  return value;
+}
+
+function fallbackNoreply(env) {
+  const raw = envTrim(env, "BETTER_AUTH_URL");
+  if (!raw) return undefined;
+  try {
+    const host = new URL(raw).hostname.replace(/^www\./, "");
+    return host.includes(".") ? `noreply@${host}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function isUsableFromAddress(from) {
+  return EMAIL_ADDR.test(extractEmailAddress(from));
 }
 
 /**
@@ -35,12 +91,16 @@ export function allowOtpLog(env) {
  *   none    — production with nothing configured
  */
 export function resolveMailer(env) {
-  const from = envTrim(env, "EMAIL_FROM");
+  const from = normalizeEmailFrom(envTrim(env, "EMAIL_FROM"), env);
   const resendKey = envTrim(env, "RESEND_API_KEY");
   const host = envTrim(env, "SMTP_HOST");
 
   if ((resendKey || host) && !from) {
     return { kind: "invalid", reason: "EMAIL_FROM is required" };
+  }
+
+  if (from && !isUsableFromAddress(from)) {
+    return { kind: "invalid", reason: "EMAIL_FROM is malformed" };
   }
 
   if (resendKey && from) {
@@ -111,8 +171,8 @@ export function formatMailerError(raw) {
   if (/401|unauthorized|invalid.*api.?key|api[_ ]?key/i.test(hay)) {
     return "Resend API Key 无效，请检查 Vercel 的 RESEND_API_KEY，保存后 Redeploy。";
   }
-  if (/from/i.test(hay) && /invalid|not allowed|unauthorized/i.test(hay)) {
-    return `EMAIL_FROM 不被 Resend 接受。请写成 途账 <noreply@diyforvisa.com>。${detail}`;
+  if (/from/i.test(hay) && /invalid|not allowed|unauthorized|malformed/i.test(hay)) {
+    return `EMAIL_FROM 不被 Resend 接受。请写成 途账 <noreply@diyforvisa.com>（尖括号不能省，也不要加引号）。${detail}`;
   }
   if (/SMTP/i.test(hay)) {
     return `SMTP 发信失败：${detail || "请检查主机、端口和授权码"}`;

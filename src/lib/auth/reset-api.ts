@@ -30,7 +30,11 @@ export const sendPasswordResetCode = createServerFn({ method: "POST" })
       );
     }
     if (mailer.kind === "invalid") {
-      throw new Error("邮件服务还没配好：已经有发信配置，但缺少 EMAIL_FROM");
+      throw new Error(
+        mailer.reason === "EMAIL_FROM is malformed"
+          ? "邮件服务还没配好：EMAIL_FROM 请写成 途账 <noreply@diyforvisa.com>"
+          : "邮件服务还没配好：已经有发信配置，但缺少 EMAIL_FROM",
+      );
     }
 
     const { getRequest } = await import("@tanstack/react-start/server");
