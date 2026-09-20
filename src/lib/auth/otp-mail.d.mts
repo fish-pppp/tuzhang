@@ -25,6 +25,8 @@ export function allowOtpLog(env: Record<string, string | undefined>): boolean;
 export function resolveMailer(env: Record<string, string | undefined>): Mailer;
 export function extractEmailAddress(from: string): string;
 export function maskEmail(email: string): string;
+export function parseProviderDetail(raw: unknown, max?: number): string;
+export function formatMailerError(raw: unknown): string;
 export function passwordResetEmail(otp: string): {
   subject: string;
   text: string;

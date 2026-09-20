@@ -51,7 +51,7 @@ npm run dev                   # http://localhost:8080
 | --- | --- |
 | 登录后刷新又变成未登录 | 请用 `http://localhost:8080` 访问。会话 Cookie 带 `Secure` 标志，浏览器只对 `localhost` 放行 http；用局域网 IP（如 `http://192.168.x.x:8080`）打开时 Cookie 会被丢弃。手机联调请用 https 反向代理或 `localhost` 端口转发。 |
 | 登录报来源校验失败 | 地址栏 origin 必须在白名单里（含协议、端口，无末尾 `/`）。自定义域名要写进 `BETTER_AUTH_URL` 或 `BETTER_AUTH_TRUSTED_ORIGINS`，不要只填 Vercel 域名。 |
-| 忘记密码提示发不了验证码 | 线上要配 `EMAIL_FROM` + `RESEND_API_KEY`（或 SMTP）。本地没配时验证码会打在跑 `npm run dev` 的终端里。 |
+| 忘记密码提示发不了验证码 | 线上要配 `EMAIL_FROM` + `RESEND_API_KEY`（或 SMTP）。页面现在会写出 Resend / SMTP 的具体原因（域名未验证、Key 无效、邮箱还没注册）。本地没配时验证码会打在跑 `npm run dev` 的终端里。 |
 | `npm run db:migrate` 连不上 | 确认 `docker compose ps` 里 db 是 healthy；`DATABASE_URL` 的端口 / 密码和 compose 文件一致。 |
 | 重启后账号全没了 | 没配 `DATABASE_URL`，跑在内存 PGLite 上。按上面第 2、3 步接上 Postgres。 |
 

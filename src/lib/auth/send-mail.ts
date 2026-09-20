@@ -4,16 +4,29 @@
  * Prefer Resend on Vercel (HTTPS). SMTP is for QQ / 163 / self-hosted.
  * Locally, with neither configured, the code is printed to the server log.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import type { Socket } from "node:net";
 import {
   extractEmailAddress,
+  formatMailerError,
   maskEmail,
   passwordResetEmail,
   resolveMailer,
 } from "./otp-mail.mjs";
+
+/** Per-request send result. Better Auth swallows sendVerificationOTP errors. */
+export type OtpSendTrace = { delivered: boolean; error: string | null };
+export const otpSendTrace = new AsyncLocalStorage<OtpSendTrace>();
+
+function noteSend(update: Partial<OtpSendTrace>): void {
+  const store = otpSendTrace.getStore();
+  if (!store) return;
+  if (update.delivered) store.delivered = true;
+  if (update.error) store.error = update.error;
+}
 
 const SMTP_TIMEOUT_MS = 20_000;
 
@@ -35,12 +48,18 @@ export async function sendPasswordResetOtp(input: {
     } catch {
       /* ignore — log line above is enough */
     }
+    noteSend({ delivered: true });
     return;
   }
 
   if (mailer.kind === "none" || mailer.kind === "invalid") {
+    const message =
+      mailer.kind === "invalid"
+        ? "邮件服务还没配好：已经有发信配置，但缺少 EMAIL_FROM"
+        : "邮件服务还没配好：Vercel 里要有 EMAIL_FROM 和 RESEND_API_KEY，保存后 Redeploy";
     console.error("[auth] password-reset mail is not configured", mailer);
-    throw new Error("邮件服务还没配好，暂时发不了验证码");
+    noteSend({ error: message });
+    throw new Error(message);
   }
 
   try {
@@ -63,9 +82,12 @@ export async function sendPasswordResetOtp(input: {
         ...content,
       });
     }
+    noteSend({ delivered: true });
   } catch (err) {
+    const message = formatMailerError(err instanceof Error ? err.message : err);
     console.error("[auth] failed to send reset OTP to", maskEmail(email), err);
-    throw new Error("验证码发送失败，请稍后再试");
+    noteSend({ error: message });
+    throw new Error(message);
   }
 }
 

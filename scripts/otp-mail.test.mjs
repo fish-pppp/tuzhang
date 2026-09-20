@@ -6,6 +6,7 @@ import {
   RESET_OTP_SECONDS,
   allowOtpLog,
   extractEmailAddress,
+  formatMailerError,
   maskEmail,
   passwordResetEmail,
   resolveMailer,
@@ -54,6 +55,30 @@ test("resolveMailer treats 587 as STARTTLS unless SMTP_SECURE=true", () => {
   assert.equal(mailer.kind, "smtp");
   assert.equal(mailer.port, 587);
   assert.equal(mailer.secure, false);
+});
+
+test("envTrim strips wrapping quotes on EMAIL_FROM", () => {
+  const mailer = resolveMailer({
+    RESEND_API_KEY: "re_test",
+    EMAIL_FROM: '"途账 <noreply@diyforvisa.com>"',
+  });
+  assert.equal(mailer.kind, "resend");
+  assert.equal(mailer.from, "途账 <noreply@diyforvisa.com>");
+});
+
+test("formatMailerError explains a Resend unverified domain", () => {
+  const message = formatMailerError(
+    'Resend 403: {"statusCode":403,"message":"The diyforvisa.com domain is not verified. Please, add and verify your domain on https://resend.com/domains"}',
+  );
+  assert.match(message, /发件域名还没在 Resend 验证通过/);
+  assert.match(message, /diyforvisa.com/);
+});
+
+test("formatMailerError explains a bad API key", () => {
+  assert.match(
+    formatMailerError("Resend 401: {\"message\":\"Invalid API key\"}"),
+    /API Key 无效/,
+  );
 });
 
 test("resolveMailer rejects a half-configured provider", () => {
