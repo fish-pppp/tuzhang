@@ -4,6 +4,7 @@
  * Prefer Resend on Vercel (HTTPS). SMTP is for QQ / 163 / self-hosted.
  * Locally, with neither configured, the code is printed to the server log.
  */
+import { writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import type { Socket } from "node:net";
@@ -25,9 +26,15 @@ export async function sendPasswordResetOtp(input: {
   const content = passwordResetEmail(input.otp);
 
   if (mailer.kind === "log") {
-    console.info(
-      `[auth] 未配置邮件服务，密码重置验证码已打印（仅开发）：${maskEmail(email)} → ${input.otp}`,
-    );
+    console.info(`[auth] RESET_OTP ${maskEmail(email)} ${input.otp}`);
+    try {
+      writeFileSync(
+        "/tmp/tuzhang-reset-otp.json",
+        `${JSON.stringify({ email, otp: input.otp, at: Date.now() })}\n`,
+      );
+    } catch {
+      /* ignore — log line above is enough */
+    }
     return;
   }
 
