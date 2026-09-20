@@ -7,7 +7,9 @@ import { normalizeDeleteReason } from "./delete-reason";
 import { homeGroupName } from "./home-group";
 import { assertCanRemoveMember } from "./member-rules";
 import { newId } from "./money";
-import type { Expense, Member, Trip } from "./types";
+import { buildSettlement } from "./settlement";
+import { normalizeExpenseShares } from "./shares";
+import type { Expense, ExpenseShare, Member, Settlement, Transfer, Trip } from "./types";
 
 export type GroupSummary = {
   id: string;
@@ -123,35 +125,100 @@ async function loadGroupTrip(
     deleted_at: string | null;
     deleted_by: string | null;
     delete_reason: string | null;
+    settlement_id: string | null;
   }>`
     select id, title, amount_cents, payer_id, created_at::text as created_at,
-           deleted_at::text as deleted_at, deleted_by, delete_reason
+           deleted_at::text as deleted_at, deleted_by, delete_reason,
+           settlement_id
     from group_expenses
     where group_id = ${groupId}
     order by created_at desc
   `;
-  const shareRows = await sql<{ expense_id: string; user_id: string }>`
-    select s.expense_id, s.user_id
+  const shareRows = await sql<{
+    expense_id: string;
+    user_id: string;
+    amount_cents: number | null;
+  }>`
+    select s.expense_id, s.user_id, s.amount_cents
     from group_expense_shares s
     join group_expenses e on e.id = s.expense_id
     where e.group_id = ${groupId}
   `;
-  const sharesByExpense = new Map<string, string[]>();
+  const sharesByExpense = new Map<string, { ids: string[]; custom: ExpenseShare[] }>();
   for (const row of shareRows) {
-    const list = sharesByExpense.get(row.expense_id) ?? [];
-    list.push(row.user_id);
+    const list = sharesByExpense.get(row.expense_id) ?? { ids: [], custom: [] };
+    list.ids.push(row.user_id);
+    if (row.amount_cents != null) {
+      list.custom.push({
+        memberId: row.user_id,
+        cents: Number(row.amount_cents),
+      });
+    }
     sharesByExpense.set(row.expense_id, list);
   }
-  const expenses: Expense[] = expenseRows.map((e) => ({
-    id: e.id,
-    title: e.title,
-    amountCents: Number(e.amount_cents),
-    payerId: e.payer_id,
-    participantIds: sharesByExpense.get(e.id) ?? [],
-    createdAt: e.created_at,
-    deletedAt: e.deleted_at,
-    deletedBy: e.deleted_by,
-    deleteReason: e.delete_reason,
+  const expenses: Expense[] = expenseRows.map((e) => {
+    const packed = sharesByExpense.get(e.id);
+    return {
+      id: e.id,
+      title: e.title,
+      amountCents: Number(e.amount_cents),
+      payerId: e.payer_id,
+      participantIds: packed?.ids ?? [],
+      ...(packed && packed.custom.length === packed.ids.length && packed.custom.length > 0
+        ? { shares: packed.custom }
+        : {}),
+      createdAt: e.created_at,
+      deletedAt: e.deleted_at,
+      deletedBy: e.deleted_by,
+      deleteReason: e.delete_reason,
+      settlementId: e.settlement_id,
+    };
+  });
+
+  const settlementRows = await sql<{
+    id: string;
+    created_by: string;
+    created_at: string;
+  }>`
+    select id, created_by, created_at::text as created_at
+    from group_settlements
+    where group_id = ${groupId}
+    order by created_at desc
+  `;
+  const transferRows = await sql<{
+    settlement_id: string;
+    from_id: string;
+    to_id: string;
+    cents: number;
+  }>`
+    select t.settlement_id, t.from_id, t.to_id, t.cents
+    from group_settlement_transfers t
+    join group_settlements s on s.id = t.settlement_id
+    where s.group_id = ${groupId}
+  `;
+  const transfersBySettlement = new Map<string, Transfer[]>();
+  for (const row of transferRows) {
+    const list = transfersBySettlement.get(row.settlement_id) ?? [];
+    list.push({
+      fromId: row.from_id,
+      toId: row.to_id,
+      cents: Number(row.cents),
+    });
+    transfersBySettlement.set(row.settlement_id, list);
+  }
+  const expensesBySettlement = new Map<string, string[]>();
+  for (const expense of expenses) {
+    if (!expense.settlementId) continue;
+    const list = expensesBySettlement.get(expense.settlementId) ?? [];
+    list.push(expense.id);
+    expensesBySettlement.set(expense.settlementId, list);
+  }
+  const settlements: Settlement[] = settlementRows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+    transfers: transfersBySettlement.get(row.id) ?? [],
+    expenseIds: expensesBySettlement.get(row.id) ?? [],
   }));
 
   return {
@@ -162,6 +229,7 @@ async function loadGroupTrip(
     members,
     formerMembers,
     expenses,
+    settlements,
   };
 }
 
@@ -191,16 +259,21 @@ export const listMyGroups = createServerFn({ method: "GET" })
       group_id: string;
       amount_cents: number;
       payer_id: string;
+      settlement_id: string | null;
     }>`
-      select e.id, e.group_id, e.amount_cents, e.payer_id
+      select e.id, e.group_id, e.amount_cents, e.payer_id, e.settlement_id
       from group_expenses e
       join group_members me on me.group_id = e.group_id
       where me.user_id = ${context.userId}
         and me.removed_at is null
         and e.deleted_at is null
     `;
-    const shareRows = await sql<{ expense_id: string; user_id: string }>`
-      select s.expense_id, s.user_id
+    const shareRows = await sql<{
+      expense_id: string;
+      user_id: string;
+      amount_cents: number | null;
+    }>`
+      select s.expense_id, s.user_id, s.amount_cents
       from group_expense_shares s
       join group_expenses e on e.id = s.expense_id
       join group_members me on me.group_id = e.group_id
@@ -208,22 +281,33 @@ export const listMyGroups = createServerFn({ method: "GET" })
         and me.removed_at is null
         and e.deleted_at is null
     `;
-    const sharesByExpense = new Map<string, string[]>();
+    const sharesByExpense = new Map<string, { ids: string[]; custom: ExpenseShare[] }>();
     for (const row of shareRows) {
-      const list = sharesByExpense.get(row.expense_id) ?? [];
-      list.push(row.user_id);
+      const list = sharesByExpense.get(row.expense_id) ?? { ids: [], custom: [] };
+      list.ids.push(row.user_id);
+      if (row.amount_cents != null) {
+        list.custom.push({
+          memberId: row.user_id,
+          cents: Number(row.amount_cents),
+        });
+      }
       sharesByExpense.set(row.expense_id, list);
     }
     const expensesByGroup = new Map<string, Expense[]>();
     for (const e of expenseRows) {
+      const packed = sharesByExpense.get(e.id);
       const list = expensesByGroup.get(e.group_id) ?? [];
       list.push({
         id: e.id,
         title: "",
         amountCents: Number(e.amount_cents),
         payerId: e.payer_id,
-        participantIds: sharesByExpense.get(e.id) ?? [],
+        participantIds: packed?.ids ?? [],
+        ...(packed && packed.custom.length === packed.ids.length && packed.custom.length > 0
+          ? { shares: packed.custom }
+          : {}),
         createdAt: "",
+        settlementId: e.settlement_id,
       });
       expensesByGroup.set(e.group_id, list);
     }
@@ -415,6 +499,14 @@ export const addGroupExpense = createServerFn({ method: "POST" })
         amountCents: z.number().int().positive(),
         payerId: z.string().min(1),
         participantIds: z.array(z.string().min(1)).min(1),
+        shares: z
+          .array(
+            z.object({
+              memberId: z.string().min(1),
+              cents: z.number().int().nonnegative(),
+            }),
+          )
+          .optional(),
       })
       .parse(data),
   )
@@ -430,18 +522,32 @@ export const addGroupExpense = createServerFn({ method: "POST" })
     const participants = [...new Set(data.participantIds)].filter((id) =>
       allowed.has(id),
     );
-    if (participants.length === 0) throw new Error("至少选择一位一起 AA 的人");
+    if (participants.length === 0) throw new Error("至少选择一位一起分摊的人");
+    const shares = normalizeExpenseShares({
+      participantIds: participants,
+      amountCents: data.amountCents,
+      shares: data.shares,
+    });
     const id = newId();
     await sql`
       insert into group_expenses (id, group_id, title, amount_cents, payer_id, created_by)
       values (${id}, ${data.groupId}, ${data.title}, ${data.amountCents}, ${data.payerId}, ${context.userId})
     `;
     try {
-      // One round-trip for all shares instead of one insert per participant.
-      await sql`
-        insert into group_expense_shares (expense_id, user_id)
-        select ${id}, unnest(${participants}::text[])
-      `;
+      if (shares) {
+        const shareIds = shares.map((s) => s.memberId);
+        const shareCents = shares.map((s) => s.cents);
+        await sql`
+          insert into group_expense_shares (expense_id, user_id, amount_cents)
+          select ${id}, t.user_id, t.cents
+          from unnest(${shareIds}::text[], ${shareCents}::int[]) as t(user_id, cents)
+        `;
+      } else {
+        await sql`
+          insert into group_expense_shares (expense_id, user_id)
+          select ${id}, unnest(${participants}::text[])
+        `;
+      }
     } catch (err) {
       // No transaction on the shared Sql surface: undo the header row so a
       // failed share insert can't leave an expense nobody is splitting.
@@ -466,6 +572,16 @@ export const removeGroupExpense = createServerFn({ method: "POST" })
     const reason = normalizeDeleteReason(data.reason);
     const sql = await getSql();
     await requireMember(sql, data.groupId, context.userId);
+    const locked = await sql<{ id: string }>`
+      select id from group_expenses
+      where id = ${data.expenseId}
+        and group_id = ${data.groupId}
+        and settlement_id is not null
+      limit 1
+    `;
+    if (locked[0]) {
+      throw new Error("这笔账单已经结算，不能再改");
+    }
     const updated = await sql<{ id: string }>`
       update group_expenses
       set deleted_at = now(),
@@ -474,12 +590,59 @@ export const removeGroupExpense = createServerFn({ method: "POST" })
       where id = ${data.expenseId}
         and group_id = ${data.groupId}
         and deleted_at is null
+        and settlement_id is null
       returning id
     `;
     if (!updated[0]) {
       throw new Error("这条账单已经删除过了");
     }
     return { ok: true as const };
+  });
+
+export const settleGroup = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: unknown) => z.object({ groupId: groupIdSchema }).parse(data))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireMember(sql, data.groupId, context.userId);
+    const trip = await loadGroupTrip(sql, data.groupId);
+    if (!trip) throw new Error("群组不存在");
+    const { settlement } = buildSettlement(trip, context.userId);
+    await sql`
+      insert into group_settlements (id, group_id, created_by)
+      values (${settlement.id}, ${data.groupId}, ${context.userId})
+    `;
+    try {
+      if (settlement.transfers.length > 0) {
+        const fromIds = settlement.transfers.map((t) => t.fromId);
+        const toIds = settlement.transfers.map((t) => t.toId);
+        const cents = settlement.transfers.map((t) => t.cents);
+        await sql`
+          insert into group_settlement_transfers (settlement_id, from_id, to_id, cents)
+          select ${settlement.id}, t.from_id, t.to_id, t.cents
+          from unnest(${fromIds}::text[], ${toIds}::text[], ${cents}::int[])
+            as t(from_id, to_id, cents)
+        `;
+      }
+      const locked = await sql<{ id: string }>`
+        update group_expenses
+        set settlement_id = ${settlement.id}
+        where group_id = ${data.groupId}
+          and deleted_at is null
+          and settlement_id is null
+          and id = any(${settlement.expenseIds}::text[])
+        returning id
+      `;
+      if (locked.length !== settlement.expenseIds.length) {
+        throw new Error("有账单刚被别人结算或删除，请刷新后再试");
+      }
+    } catch (err) {
+      await sql`delete from group_settlements where id = ${settlement.id}`.catch(
+        () => undefined,
+      );
+      throw err;
+    }
+    return { id: settlement.id };
   });
 
 export const removeGroupMember = createServerFn({ method: "POST" })

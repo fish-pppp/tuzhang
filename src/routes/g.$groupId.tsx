@@ -11,6 +11,7 @@ import {
   removeGroupExpense,
   removeGroupMember,
   renameGroup,
+  settleGroup,
   updateMyName,
 } from "@/lib/split/group-api";
 
@@ -113,8 +114,14 @@ function GroupPage() {
               amountCents: input.amountCents,
               payerId: input.payerId,
               participantIds: input.participantIds,
+              shares: input.shares,
             },
           });
+          await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
+          await queryClient.invalidateQueries({ queryKey: ["groups"] });
+        }}
+        onSettle={async () => {
+          await settleGroup({ data: { groupId } });
           await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
           await queryClient.invalidateQueries({ queryKey: ["groups"] });
         }}

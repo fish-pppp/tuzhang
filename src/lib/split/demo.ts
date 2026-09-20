@@ -63,7 +63,21 @@ export const DEMO_TRIP: Trip = {
       participantIds: [...ALL],
       createdAt: "2026-08-16T20:15:00.000Z",
     },
+    {
+      id: "e7",
+      title: "束河古镇咖啡",
+      amountCents: 12800,
+      payerId: "yeah",
+      participantIds: ["yeah", "xinxin", "yuki"],
+      shares: [
+        { memberId: "yeah", cents: 5800 },
+        { memberId: "xinxin", cents: 4200 },
+        { memberId: "yuki", cents: 2800 },
+      ],
+      createdAt: "2026-08-17T15:40:00.000Z",
+    },
   ],
+  settlements: [],
 };
 
 export function cloneDemoTrip(): Trip {

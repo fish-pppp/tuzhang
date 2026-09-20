@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Copy, Plus, RotateCcw, Users } from "lucide-react";
+import { ArrowRight, Copy, Download, Plus, RotateCcw, Users } from "lucide-react";
 import { AddExpenseDialog } from "@/components/add-expense-dialog";
 import { AuthSlot } from "@/components/auth-slot";
 import { DeleteExpenseDialog } from "@/components/delete-expense-dialog";
@@ -9,14 +9,32 @@ import { MemberAvatar } from "@/components/member-avatar";
 import { MembersDialog } from "@/components/members-dialog";
 import { MyGroupsPanel } from "@/components/my-groups";
 import { MyLedger } from "@/components/my-ledger";
+import { SettleDialog } from "@/components/settle-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { computeLedger, expenseInvolves } from "@/lib/split/calc";
+import { formatAppVersionLine } from "@/lib/app-version";
+import {
+  activeTotalCents,
+  computeLedger,
+  expenseInvolves,
+  expenseSplitLabel,
+  shareBreakdown,
+} from "@/lib/split/calc";
+import { downloadMarkdown, exportFileName, exportTripMarkdown } from "@/lib/split/export-md";
 import { formatMoney } from "@/lib/split/money";
+import { openExpenses, tripSettlements } from "@/lib/split/settlement";
 import { useTripStore } from "@/lib/split/store";
 import { useTripSync } from "@/lib/split/use-trip-sync";
-import { isActiveExpense, type Expense, type Member, type Trip } from "@/lib/split/types";
+import {
+  isActiveExpense,
+  isCustomSplit,
+  isOpenExpense,
+  isSettledExpense,
+  type Expense,
+  type Member,
+  type Trip,
+} from "@/lib/split/types";
 import { cn } from "@/lib/utils";
 
 export type TripViewProps = {
@@ -29,9 +47,13 @@ export type TripViewProps = {
   formerMembers?: Member[];
   onRename: (name: string) => void;
   onAddExpense: (
-    input: Omit<Expense, "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason">,
+    input: Omit<
+      Expense,
+      "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
+    >,
   ) => void | Promise<void>;
   onRemoveExpense: (id: string, reason: string) => void | Promise<void>;
+  onSettle: () => void | Promise<void>;
   onSetMe?: (id: string) => void;
   onLeave?: () => void;
   onUpdateMyName?: (name: string) => void | Promise<void>;
@@ -48,6 +70,7 @@ export function TripView({
   onRename,
   onAddExpense,
   onRemoveExpense,
+  onSettle,
   onSetMe,
   onLeave,
   onUpdateMyName,
@@ -60,8 +83,13 @@ export function TripView({
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(meId);
   const [copied, setCopied] = useState(false);
   const [deleting, setDeleting] = useState<Expense | null>(null);
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [exported, setExported] = useState(false);
 
   const ledger = useMemo(() => computeLedger(trip), [trip]);
+  const lifetimeCents = useMemo(() => activeTotalCents(trip.expenses), [trip.expenses]);
+  const settlements = useMemo(() => tripSettlements(trip), [trip]);
+  const openBillCount = useMemo(() => openExpenses(trip).length, [trip]);
   const byId = useMemo(
     () => Object.fromEntries(ledger.perPerson.map((p) => [p.memberId, p])),
     [ledger],
@@ -75,7 +103,7 @@ export function TripView({
   );
   const avgCents =
     trip.members.length > 0
-      ? Math.round(ledger.totalCents / trip.members.length)
+      ? Math.round(lifetimeCents / trip.members.length)
       : 0;
 
   const activeExpenses = trip.expenses.filter(isActiveExpense);
@@ -134,6 +162,7 @@ export function TripView({
             {trip.members.length} 人同行
             {variant === "demo" ? " · 本地示例，可随便改" : " · 登录账号一起记"}
           </p>
+          <p className="mt-1 text-xs text-subtle">{formatAppVersionLine()}</p>
           {inviteCode ? (
             <button
               type="button"
@@ -253,12 +282,26 @@ export function TripView({
           </section>
 
           <section className="mb-6 grid grid-cols-3 gap-2 sm:gap-3">
-            <StatCard label="总支出" value={formatMoney(ledger.totalCents)} />
+            <StatCard
+              label="总支出"
+              value={formatMoney(lifetimeCents)}
+              hint={
+                settlements.length > 0
+                  ? `本期未结 ${formatMoney(ledger.totalCents)}`
+                  : undefined
+              }
+            />
             <StatCard label="人均" value={formatMoney(avgCents)} />
             <StatCard
               label="待结清"
               value={formatMoney(ledger.unsettledCents)}
-              hint={ledger.transfers.length === 0 ? "已结清" : `${ledger.transfers.length} 笔`}
+              hint={
+                ledger.transfers.length === 0
+                  ? openBillCount === 0
+                    ? "本期已结清"
+                    : "本期已平"
+                  : `${ledger.transfers.length} 笔`
+              }
             />
           </section>
 
@@ -333,9 +376,26 @@ export function TripView({
             </section>
 
             <section className="rounded-2xl bg-surface p-4 shadow-card lg:col-span-2 lg:p-5">
-              <h2 className="mb-4 font-display text-lg font-semibold">怎么还</h2>
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <h2 className="font-display text-lg font-semibold">怎么还</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={openBillCount === 0}
+                  onClick={() => setSettleOpen(true)}
+                >
+                  提前结算
+                </Button>
+              </div>
+              <p className="mb-3 text-xs text-muted">
+                只算还没结算的账单。线下转完后点「提前结算」，对应记录会锁住。
+              </p>
               {ledger.transfers.length === 0 ? (
-                <p className="text-sm text-muted">账单已结清，没有人还要付钱。</p>
+                <p className="text-sm text-muted">
+                  {openBillCount === 0
+                    ? "本期没有未结账单。"
+                    : "本期已经平了，没有人还要付钱。"}
+                </p>
               ) : (
                 <ul className="space-y-3">
                   {ledger.transfers.map((t) => {
@@ -364,6 +424,48 @@ export function TripView({
                   })}
                 </ul>
               )}
+              {settlements.length > 0 ? (
+                <div className="mt-5 border-t border-border pt-4">
+                  <h3 className="mb-2 text-sm font-medium">已结算</h3>
+                  <ul className="space-y-3">
+                    {settlements.map((settlement, index) => (
+                      <li key={settlement.id} className="rounded-lg bg-bg-elevated px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium">
+                            第 {settlements.length - index} 次提前结算
+                          </p>
+                          <Badge variant="settled">已结算</Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-subtle">
+                          {formatDeletedAt(settlement.createdAt)}
+                          {settlement.createdBy && memberMap[settlement.createdBy]
+                            ? ` · ${memberMap[settlement.createdBy]?.name}`
+                            : ""}
+                          {" · "}
+                          {settlement.expenseIds.length} 笔账单
+                        </p>
+                        {settlement.transfers.length === 0 ? (
+                          <p className="mt-2 text-xs text-muted">当时账已经平了。</p>
+                        ) : (
+                          <ul className="mt-2 space-y-1">
+                            {settlement.transfers.map((t) => (
+                              <li
+                                key={`${settlement.id}-${t.fromId}-${t.toId}`}
+                                className="text-xs text-muted"
+                              >
+                                {memberMap[t.fromId]?.name ?? "未知"}
+                                <ArrowRight className="mx-1 inline size-3 text-subtle" />
+                                {memberMap[t.toId]?.name ?? "未知"}{" "}
+                                <span className="tabular-nums">{formatMoney(t.cents)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </section>
           </div>
         </>
@@ -388,6 +490,18 @@ export function TripView({
                   与我相关
                 </BillScopeButton>
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  downloadMarkdown(exportFileName(trip.name), exportTripMarkdown(trip));
+                  setExported(true);
+                  window.setTimeout(() => setExported(false), 1600);
+                }}
+              >
+                <Download className="size-3.5" />
+                {exported ? "已导出" : "导出记录"}
+              </Button>
               {variant === "demo" ? <DemoBillActions /> : null}
             </div>
           </div>
@@ -407,7 +521,9 @@ export function TripView({
             <ul className="divide-y divide-border">
               {visibleExpenses.map((expense) => {
                 const payer = memberMap[expense.payerId];
-                const n = expense.participantIds.length;
+                const slices = shareBreakdown(expense);
+                const settled = isSettledExpense(expense);
+                const custom = isCustomSplit(expense);
                 return (
                   <li key={expense.id} className="flex items-start gap-3 py-3">
                     <MemberAvatar
@@ -416,49 +532,63 @@ export function TripView({
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-3">
-                        <p className="truncate font-medium">{expense.title}</p>
+                        <p className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-medium">{expense.title}</span>
+                          {settled ? <Badge variant="settled">已结算</Badge> : null}
+                        </p>
                         <p className="shrink-0 font-medium tabular-nums">
                           {formatMoney(expense.amountCents)}
                         </p>
                       </div>
                       <p className="mt-0.5 text-xs text-muted">
-                        {payer?.name ?? "未知"} 付 · {n} 人 AA
-                        {n > 0 && (
+                        {payer?.name ?? "未知"} 付 · {expenseSplitLabel(expense)}
+                        {!custom && expense.participantIds.length > 0 && (
                           <span className="tabular-nums">
                             {" "}
-                            · {formatMoney(Math.round(expense.amountCents / n))}/人
+                            · {formatMoney(Math.round(expense.amountCents / expense.participantIds.length))}/人
                           </span>
                         )}
                       </p>
                       <ul className="mt-2 flex flex-wrap gap-2">
-                        {expense.participantIds.map((id) => {
-                          const m = memberMap[id];
-                          if (!m) return null;
-                          return (
-                            <li
-                              key={id}
-                              className="flex w-12 flex-col items-center gap-0.5"
-                            >
-                              <MemberAvatar
-                                member={m}
-                                size="sm"
-                                className="size-7 outline-surface"
-                              />
-                              <span className="w-full truncate text-center text-[11px] leading-tight text-muted">
-                                {m.name}
-                              </span>
-                            </li>
-                          );
-                        })}
+                        {(custom ? slices : expense.participantIds.map((id) => ({ memberId: id, cents: 0 }))).map(
+                          (slice) => {
+                            const person = memberMap[slice.memberId];
+                            if (!person) return null;
+                            return (
+                              <li
+                                key={slice.memberId}
+                                className="flex w-14 flex-col items-center gap-0.5"
+                              >
+                                <MemberAvatar
+                                  member={person}
+                                  size="sm"
+                                  className="size-7 outline-surface"
+                                />
+                                <span className="w-full truncate text-center text-[11px] leading-tight text-muted">
+                                  {person.name}
+                                </span>
+                                {custom ? (
+                                  <span className="w-full truncate text-center text-[10px] tabular-nums text-subtle">
+                                    {formatMoney(slice.cents)}
+                                  </span>
+                                ) : null}
+                              </li>
+                            );
+                          },
+                        )}
                       </ul>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setDeleting(expense)}
-                      className="mt-1 min-h-10 text-xs text-subtle hover:text-owe"
-                    >
-                      删除
-                    </button>
+                    {settled ? (
+                      <span className="mt-1 min-h-10 text-xs text-subtle">已锁</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setDeleting(expense)}
+                        className="mt-1 min-h-10 text-xs text-subtle hover:text-owe"
+                      >
+                        删除
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -487,7 +617,7 @@ export function TripView({
                         </p>
                       </div>
                       <p className="mt-1 text-xs text-muted">
-                        {payer?.name ?? "未知"} 付 · {expense.participantIds.length} 人 AA
+                        {payer?.name ?? "未知"} 付 · {expenseSplitLabel(expense)}
                       </p>
                       <p className="mt-1.5 text-sm">
                         <span className="text-owe">删除原因：</span>
@@ -508,12 +638,14 @@ export function TripView({
 
       <Separator className="my-8" />
       <p className="pb-2 text-center text-xs text-subtle">
+        {formatAppVersionLine()}
+        <br />
         {variant === "demo"
           ? "这是示例。登录后可建群，邀请朋友用各自的账号一起记。"
           : "群里每个人登录后都能记账，结余会一起更新。"}
       </p>
 
-      {!expenseOpen && !membersOpen && !deleting && (
+      {!expenseOpen && !membersOpen && !deleting && !settleOpen && (
         <Button
           type="button"
           onClick={() => setExpenseOpen(true)}
@@ -532,12 +664,19 @@ export function TripView({
         onAdd={onAddExpense}
       />
       <DeleteExpenseDialog
-        expense={deleting}
+        expense={deleting && isOpenExpense(deleting) ? deleting : null}
         onClose={() => setDeleting(null)}
         onConfirm={(reason) => {
           if (!deleting) return;
           return onRemoveExpense(deleting.id, reason);
         }}
+      />
+      <SettleDialog
+        open={settleOpen}
+        onOpenChange={setSettleOpen}
+        trip={trip}
+        membersById={memberMap}
+        onConfirm={onSettle}
       />
       {variant === "demo" ? (
         <MembersDialog open={membersOpen} onOpenChange={setMembersOpen} />
@@ -660,6 +799,7 @@ export function TripBoard() {
   const renameTrip = useTripStore((s) => s.renameTrip);
   const addExpense = useTripStore((s) => s.addExpense);
   const removeExpense = useTripStore((s) => s.removeExpense);
+  const settleOpen = useTripStore((s) => s.settleOpen);
   const setMeId = useTripStore((s) => s.setMeId);
 
   useTripSync();
@@ -677,6 +817,7 @@ export function TripBoard() {
       onRename={renameTrip}
       onAddExpense={addExpense}
       onRemoveExpense={removeExpense}
+      onSettle={settleOpen}
       onSetMe={setMeId}
     />
   );

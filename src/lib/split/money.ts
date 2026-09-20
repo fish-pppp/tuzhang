@@ -6,11 +6,12 @@ export function formatMoney(cents: number): string {
   }).format(cents / 100);
 }
 
-export function parseYuan(raw: string): number | null {
+export function parseYuan(raw: string, opts?: { allowZero?: boolean }): number | null {
   const cleaned = raw.replace(/[¥￥,\s]/g, "").trim();
   if (!cleaned) return null;
   const value = Number(cleaned);
-  if (!Number.isFinite(value) || value <= 0) return null;
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (!opts?.allowZero && value <= 0) return null;
   return Math.round(value * 100);
 }
 

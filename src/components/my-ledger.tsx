@@ -1,7 +1,7 @@
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
 import { Badge } from "@/components/ui/badge";
-import { personalBook } from "@/lib/split/calc";
+import { expenseSplitLabel, personalBook } from "@/lib/split/calc";
 import { formatMoney } from "@/lib/split/money";
 import type { Expense, Trip } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
@@ -85,8 +85,7 @@ export function MyLedger({ trip, meId }: { trip: Trip; meId: string }) {
               <li key={expense.id} className="py-3">
                 <ExpenseHead expense={expense} />
                 <p className="mt-1 text-xs text-muted tabular-nums">
-                  {expense.participantIds.length} 人 AA · 我自己承担{" "}
-                  {formatMoney(myShareCents)}
+                  {expenseSplitLabel(expense)} · 我自己承担 {formatMoney(myShareCents)}
                 </p>
                 {others.length > 0 ? (
                   <ul className="mt-3 space-y-2">
@@ -151,7 +150,7 @@ export function MyLedger({ trip, meId }: { trip: Trip; meId: string }) {
                       {formatDay(expense.createdAt)}
                       {formatDay(expense.createdAt) ? " · " : ""}
                       {payer?.name ?? "未知"} 付了 {formatMoney(expense.amountCents)} ·{" "}
-                      {expense.participantIds.length} 人 AA
+                      {expenseSplitLabel(expense)}
                     </p>
                   </div>
                 </li>

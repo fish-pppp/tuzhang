@@ -1,20 +1,13 @@
+import { resolveShares } from "./shares";
 import type { Expense, Ledger, PersonLedger, Transfer, Trip } from "./types";
-import { isActiveExpense } from "./types";
+import { isActiveExpense, isOpenExpense } from "./types";
 
-export function splitShares(amountCents: number, n: number): number[] {
-  if (n <= 0) return [];
-  const base = Math.floor(amountCents / n);
-  const rem = amountCents % n;
-  return Array.from({ length: n }, (_, i) => base + (i < rem ? 1 : 0));
-}
+export { equalShares, resolveShares, splitShares } from "./shares";
 
 export type ShareSlice = { memberId: string; cents: number };
 
 export function shareBreakdown(expense: Expense): ShareSlice[] {
-  const ids = expense.participantIds;
-  if (ids.length === 0 || expense.amountCents <= 0) return [];
-  const slices = splitShares(expense.amountCents, ids.length);
-  return ids.map((memberId, i) => ({ memberId, cents: slices[i] ?? 0 }));
+  return resolveShares(expense);
 }
 
 export function shareForMember(expense: Expense, memberId: string): number {
@@ -29,19 +22,20 @@ export function computeLedger(trip: Trip): Ledger {
     share.set(m.id, 0);
   }
 
+  const allowed = new Set(trip.members.map((m) => m.id));
   let totalCents = 0;
   for (const expense of trip.expenses) {
-    if (!isActiveExpense(expense)) continue;
-    const participants = expense.participantIds.filter((id) => share.has(id));
-    if (participants.length === 0 || expense.amountCents <= 0) continue;
+    if (!isOpenExpense(expense)) continue;
+    const slices = resolveShares(expense, allowed);
+    if (slices.length === 0 || expense.amountCents <= 0) continue;
     totalCents += expense.amountCents;
     if (paid.has(expense.payerId)) {
       paid.set(expense.payerId, (paid.get(expense.payerId) ?? 0) + expense.amountCents);
     }
-    const slices = splitShares(expense.amountCents, participants.length);
-    participants.forEach((id, i) => {
-      share.set(id, (share.get(id) ?? 0) + (slices[i] ?? 0));
-    });
+    for (const slice of slices) {
+      if (!share.has(slice.memberId)) continue;
+      share.set(slice.memberId, (share.get(slice.memberId) ?? 0) + slice.cents);
+    }
   }
 
   const perPerson: PersonLedger[] = trip.members.map((m) => {
@@ -125,7 +119,7 @@ export function personalBook(trip: Trip, memberId: string): PersonalBook | null 
   const me = ledger.perPerson.find((p) => p.memberId === memberId);
   if (!me) return null;
   const paidByMe: PaidByMeRow[] = trip.expenses
-    .filter((e) => isActiveExpense(e) && e.payerId === memberId)
+    .filter((e) => isOpenExpense(e) && e.payerId === memberId)
     .map((expense) => {
       const slices = shareBreakdown(expense);
       const myShareCents = slices.find((s) => s.memberId === memberId)?.cents ?? 0;
@@ -140,7 +134,7 @@ export function personalBook(trip: Trip, memberId: string): PersonalBook | null 
   const INeedToChip: ShareOfMineRow[] = trip.expenses
     .filter(
       (e) =>
-        isActiveExpense(e) &&
+        isOpenExpense(e) &&
         e.payerId !== memberId &&
         e.participantIds.includes(memberId),
     )
@@ -168,15 +162,35 @@ export function memberBalance(
   let paidCents = 0;
   let shareCents = 0;
   for (const expense of expenses) {
-    if (!isActiveExpense(expense)) continue;
+    if (!isOpenExpense(expense)) continue;
     if (expense.payerId === memberId) paidCents += expense.amountCents;
     shareCents += shareForMember(expense, memberId);
   }
-  const activeCount = expenses.filter(isActiveExpense).length;
+  const openCount = expenses.filter(isOpenExpense).length;
   return {
     paidCents,
     shareCents,
     netCents: paidCents - shareCents,
-    expenseCount: activeCount,
+    expenseCount: openCount,
   };
+}
+
+export function expenseSplitLabel(expense: Expense): string {
+  const n = expense.participantIds.length;
+  if (expense.shares && expense.shares.length > 0) {
+    return `${n} 人自定义`;
+  }
+  return `${n} 人 AA`;
+}
+
+/** Count active bills (including already-settled ones) for history totals. */
+export function activeExpenseCount(expenses: Expense[]): number {
+  return expenses.filter(isActiveExpense).length;
+}
+
+/** Lifetime spend still on the books, including already-settled bills. */
+export function activeTotalCents(expenses: Expense[]): number {
+  return expenses
+    .filter(isActiveExpense)
+    .reduce((sum, expense) => sum + expense.amountCents, 0);
 }
