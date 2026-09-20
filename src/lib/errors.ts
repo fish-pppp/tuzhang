@@ -17,7 +17,7 @@ const AUTH_MESSAGES: Array<[RegExp, string]> = [
   [/too many attempts/i, "验证码试太多次了，请重新发送"],
   [/unsupported otp type/i, "验证码类型不对"],
   [/邮件服务还没配好/i, "邮件服务还没配好，暂时发不了验证码"],
-  [/验证码发送失败/i, "验证码发送失败，请稍后再试"],
+  [/^验证码发送失败$/i, "验证码发送失败，请稍后再试"],
   [/invalid email or password|invalid password|user not found/i, "邮箱或密码不对"],
   [/invalid email/i, "邮箱格式不对"],
   [/password too short|at least 8/i, "密码至少 8 位"],

@@ -1,5 +1,6 @@
 import { emailOTPClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
+import { sendPasswordResetCode } from "./reset-api";
 
 /**
  * Better Auth client for this React SPA (browser-side).
@@ -20,10 +21,9 @@ export const authClient = createAuthClient({
   },
 });
 
-/** Send a 6-digit reset code to `email` (always looks successful if the address is unknown). */
+/** Send a 6-digit reset code. Throws if the mailer rejects the message. */
 export async function requestPasswordResetCode(email: string): Promise<void> {
-  const { error } = await authClient.emailOtp.requestPasswordReset({ email });
-  if (error) throw new Error(error.message || "发送验证码失败");
+  await sendPasswordResetCode({ data: { email } });
 }
 
 /** Set a new password after the user types the email OTP. */

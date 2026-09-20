@@ -22,6 +22,7 @@ export function ForgotPasswordForm({
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
 
@@ -33,6 +34,7 @@ export function ForgotPasswordForm({
 
   async function sendCode() {
     setError(null);
+    setNotice(null);
     const trimmed = email.trim();
     if (!trimmed.includes("@")) {
       setError("请填写邮箱");
@@ -42,6 +44,7 @@ export function ForgotPasswordForm({
     try {
       await requestPasswordResetCode(trimmed);
       setStep("code");
+      setNotice("发送成功，请到邮箱查看验证码（也看一眼垃圾箱）。");
       setCooldown(RESEND_COOLDOWN_SEC);
     } catch (err) {
       setError(
@@ -115,11 +118,10 @@ export function ForgotPasswordForm({
         />
       </div>
 
+      {notice ? <p className="text-sm text-receive">{notice}</p> : null}
+
       {step === "code" ? (
         <>
-          <p className="text-sm text-muted">
-            如果这个邮箱已经注册，验证码会发到收件箱（也看一眼垃圾箱）。
-          </p>
           <div className="space-y-1.5">
             <Label htmlFor="reset-otp">验证码</Label>
             <Input

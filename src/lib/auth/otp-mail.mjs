@@ -4,10 +4,12 @@ export const RESET_OTP_MINUTES = 10;
 export const RESET_OTP_SECONDS = RESET_OTP_MINUTES * 60;
 export const RESET_OTP_LENGTH = 6;
 
-/** Read an env var, treating empty/whitespace as unset. */
+/** Read an env var, treating empty/whitespace as unset. Strips wrapping quotes. */
 export function envTrim(env, key) {
   const value = env[key]?.trim();
-  return value ? value : undefined;
+  if (!value) return undefined;
+  const unquoted = value.replace(/^(['"])(.*)\1$/, "$2").trim();
+  return unquoted || undefined;
 }
 
 /**
@@ -80,6 +82,42 @@ export function maskEmail(email) {
   const domain = trimmed.slice(at + 1);
   const shown = local.length <= 1 ? `${local}*` : `${local.slice(0, 2)}***`;
   return `${shown}@${domain}`;
+}
+
+/** Pull a short provider message out of `Resend 403: {"message":"..."}`. */
+export function parseProviderDetail(raw, max = 180) {
+  const text = String(raw ?? "");
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed && typeof parsed.message === "string" && parsed.message.trim()) {
+        return parsed.message.replace(/\s+/g, " ").trim().slice(0, max);
+      }
+    } catch {
+      /* not JSON */
+    }
+  }
+  return text.replace(/^Resend \d+:\s*/i, "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+/** Resend / SMTP failure → Chinese copy the user can act on. */
+export function formatMailerError(raw) {
+  const detail = parseProviderDetail(raw);
+  const hay = `${raw}\n${detail}`;
+  if (/not verified|unverified domain/i.test(hay)) {
+    return `发件域名还没在 Resend 验证通过。EMAIL_FROM 必须是已验证域名，例如 途账 <noreply@diyforvisa.com>。${detail}`;
+  }
+  if (/401|unauthorized|invalid.*api.?key|api[_ ]?key/i.test(hay)) {
+    return "Resend API Key 无效，请检查 Vercel 的 RESEND_API_KEY，保存后 Redeploy。";
+  }
+  if (/from/i.test(hay) && /invalid|not allowed|unauthorized/i.test(hay)) {
+    return `EMAIL_FROM 不被 Resend 接受。请写成 途账 <noreply@diyforvisa.com>。${detail}`;
+  }
+  if (/SMTP/i.test(hay)) {
+    return `SMTP 发信失败：${detail || "请检查主机、端口和授权码"}`;
+  }
+  return detail ? `验证码发送失败：${detail}` : "验证码发送失败，请稍后再试";
 }
 
 export function passwordResetEmail(otp) {
