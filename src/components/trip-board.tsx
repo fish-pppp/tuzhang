@@ -1,27 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Copy, Download, Plus, RotateCcw, Users } from "lucide-react";
+import { ArrowRight, ChevronDown, Download, Plus, RotateCcw, Users } from "lucide-react";
 import { AddExpenseDialog } from "@/components/add-expense-dialog";
-import { ExpensePhotoStrip } from "@/components/expense-photos";
 import { AuthSlot } from "@/components/auth-slot";
 import { DeleteExpenseDialog } from "@/components/delete-expense-dialog";
+import { ExpenseDayList } from "@/components/expense-card";
+import { ExpenseDetailDialog } from "@/components/expense-detail-dialog";
 import { GroupMembersDialog } from "@/components/group-members-dialog";
 import { GroupSwitcher } from "@/components/group-switcher";
 import { MemberAvatar } from "@/components/member-avatar";
 import { MembersDialog } from "@/components/members-dialog";
 import { MyGroupsPanel } from "@/components/my-groups";
-import { MyLedger } from "@/components/my-ledger";
 import { SettleDialog } from "@/components/settle-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { formatAppVersionLine } from "@/lib/app-version";
-import {
-  activeTotalCents,
-  computeLedger,
-  expenseInvolves,
-  expenseSplitLabel,
-  shareBreakdown,
-} from "@/lib/split/calc";
+import { computeLedger, expenseInvolves } from "@/lib/split/calc";
+import { formatStamp, groupByDay } from "@/lib/split/date";
 import { downloadMarkdown, exportFileName, exportTripMarkdown } from "@/lib/split/export-md";
 import { formatMoney } from "@/lib/split/money";
 import { openExpenses, tripSettlements } from "@/lib/split/settlement";
@@ -29,9 +22,7 @@ import { useTripStore } from "@/lib/split/store";
 import { useTripSync } from "@/lib/split/use-trip-sync";
 import {
   isActiveExpense,
-  isCustomSplit,
   isOpenExpense,
-  isSettledExpense,
   type Expense,
   type ExpensePhoto,
   type Member,
@@ -64,6 +55,8 @@ export type TripViewProps = {
   onRemoveMember?: (userId: string) => void | Promise<void>;
 };
 
+type BoardTab = "mine" | "all" | "settle";
+
 export function TripView({
   trip,
   meId,
@@ -82,24 +75,18 @@ export function TripView({
   onUpdateMyName,
   onRemoveMember,
 }: TripViewProps) {
-  const [tab, setTab] = useState<"all" | "mine">("all");
-  const [billScope, setBillScope] = useState<"all" | "mine">("all");
+  const [tab, setTab] = useState<BoardTab>("mine");
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(meId);
-  const [copied, setCopied] = useState(false);
+  const [detail, setDetail] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState<Expense | null>(null);
   const [settleOpen, setSettleOpen] = useState(false);
   const [exported, setExported] = useState(false);
+  const [pastOpen, setPastOpen] = useState(false);
 
   const ledger = useMemo(() => computeLedger(trip), [trip]);
-  const lifetimeCents = useMemo(() => activeTotalCents(trip.expenses), [trip.expenses]);
   const settlements = useMemo(() => tripSettlements(trip), [trip]);
   const openBillCount = useMemo(() => openExpenses(trip).length, [trip]);
-  const byId = useMemo(
-    () => Object.fromEntries(ledger.perPerson.map((p) => [p.memberId, p])),
-    [ledger],
-  );
   const memberMap = useMemo(
     () =>
       Object.fromEntries(
@@ -107,48 +94,44 @@ export function TripView({
       ),
     [formerMembers, trip.members],
   );
-  const avgCents =
-    trip.members.length > 0
-      ? Math.round(lifetimeCents / trip.members.length)
-      : 0;
+  const myNet = meId
+    ? (ledger.perPerson.find((p) => p.memberId === meId)?.netCents ?? 0)
+    : 0;
 
-  const activeExpenses = trip.expenses.filter(isActiveExpense);
-  const visibleExpenses =
-    billScope === "mine"
-      ? meId
-        ? activeExpenses.filter((e) => expenseInvolves(e, meId))
-        : []
-      : activeExpenses;
-  const deletedExpenses = trip.expenses.filter((e) => !isActiveExpense(e));
-  const visibleDeleted =
-    billScope === "mine"
-      ? meId
-        ? deletedExpenses.filter(
-            (e) => expenseInvolves(e, meId) || e.deletedBy === meId,
-          )
-        : []
-      : deletedExpenses;
-  const emptyGroup = variant === "group" && activeExpenses.length === 0;
+  const activeExpenses = useMemo(
+    () => trip.expenses.filter(isActiveExpense),
+    [trip.expenses],
+  );
+  const myExpenses = useMemo(
+    () =>
+      meId ? activeExpenses.filter((e) => expenseInvolves(e, meId)) : [],
+    [activeExpenses, meId],
+  );
+  const deletedExpenses = useMemo(
+    () => trip.expenses.filter((e) => !isActiveExpense(e)),
+    [trip.expenses],
+  );
 
-  async function copyInvite() {
-    if (!inviteCode) return;
-    const url =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/join/${inviteCode}`
-        : inviteCode;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setCopied(false);
-    }
+  useEffect(() => {
+    setDetail((current) => {
+      if (!current) return current;
+      return trip.expenses.find((e) => e.id === current.id) ?? null;
+    });
+  }, [trip.expenses]);
+
+  function exportRecords() {
+    downloadMarkdown(exportFileName(trip.name), exportTripMarkdown(trip));
+    setExported(true);
+    window.setTimeout(() => setExported(false), 1600);
   }
+
+  const dialogOpen =
+    expenseOpen || membersOpen || Boolean(deleting) || settleOpen || Boolean(detail);
 
   return (
     <div className="relative mx-auto min-h-dvh max-w-5xl px-4 pb-28 pt-6 sm:px-6">
       <header className="mb-6 flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="mb-2 flex items-center gap-2">
             <p className="text-xs font-medium tracking-[0.18em] text-muted uppercase">
               途账
@@ -164,496 +147,99 @@ export function TripView({
             className="w-full max-w-md bg-transparent font-display text-3xl font-semibold tracking-tight text-fg outline-none sm:text-4xl"
             aria-label="旅行或群组名称"
           />
-          <p className="mt-1 text-sm text-muted">
-            {trip.members.length} 人同行
-            {variant === "demo" ? " · 本地示例，可随便改" : " · 登录账号一起记"}
-          </p>
-          <p className="mt-1 text-xs text-subtle">{formatAppVersionLine()}</p>
-          {inviteCode ? (
-            <button
-              type="button"
-              onClick={() => void copyInvite()}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-chip px-3 py-1 text-xs font-medium text-muted hover:text-fg"
-            >
-              <Copy className="size-3" />
-              {copied ? "已复制邀请链接" : `邀请码 ${inviteCode}`}
-            </button>
-          ) : null}
         </div>
-        <AuthSlot />
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-10"
+            onClick={() => setMembersOpen(true)}
+            aria-label={variant === "demo" ? "管理成员" : "成员"}
+          >
+            <Users className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-10"
+            onClick={exportRecords}
+            aria-label={exported ? "已导出" : "导出记录"}
+          >
+            <Download className="size-4" />
+          </Button>
+          <AuthSlot />
+        </div>
       </header>
 
       {variant === "demo" ? <MyGroupsPanel /> : null}
 
       <div className="mb-5 flex rounded-full bg-chip p-1">
-        <TabButton active={tab === "all"} onClick={() => setTab("all")}>
-          全员
-        </TabButton>
         <TabButton active={tab === "mine"} onClick={() => setTab("mine")}>
-          我的A款
+          我的
+        </TabButton>
+        <TabButton active={tab === "all"} onClick={() => setTab("all")}>
+          全部
+        </TabButton>
+        <TabButton active={tab === "settle"} onClick={() => setTab("settle")}>
+          结算
         </TabButton>
       </div>
 
-      {tab === "mine" && !meId ? (
-        <section className="rounded-2xl bg-surface p-5 shadow-card">
-          <h2 className="font-display text-lg font-semibold">你是谁？</h2>
-          <p className="mt-1 text-sm text-muted">
-            先点一个头像，标记成你自己，就能看你A了哪些钱、还要A多少。
-          </p>
-          <ul className="mt-4 flex flex-wrap gap-3">
-            {trip.members.map((member) => (
-              <li key={member.id}>
-                <button
-                  type="button"
-                  onClick={() => onSetMe?.(member.id)}
-                  className="flex w-20 flex-col items-center gap-2 rounded-xl px-2 py-2 hover:bg-chip"
-                >
-                  <MemberAvatar member={member} size="lg" />
-                  <span className="text-xs font-medium">{member.name}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {tab === "mine" && meId ? <MyLedger trip={trip} meId={meId} /> : null}
-
-      {tab === "all" ? (
-        <>
-          {emptyGroup ? (
-            <section className="mb-6 rounded-2xl bg-surface p-4 shadow-card sm:p-5">
-              <h2 className="font-display text-lg font-semibold">群刚建好</h2>
-              <p className="mt-1 text-sm text-muted">
-                把邀请码发给同行。他们登录后加入，就会用自己的账号出现在上面，一起记账。
-              </p>
-              {inviteCode ? (
-                <button
-                  type="button"
-                  onClick={() => void copyInvite()}
-                  className="mt-3 inline-flex items-center gap-2 rounded-full bg-chip px-4 py-2 text-sm font-medium"
-                >
-                  <Copy className="size-4" />
-                  {copied ? "已复制邀请链接" : `复制邀请 · ${inviteCode}`}
-                </button>
-              ) : null}
-            </section>
-          ) : null}
-
-          <section className="-mx-4 mb-6 overflow-x-auto px-4 pb-2 sm:mx-0 sm:overflow-visible sm:px-0">
-            <ul className="flex min-w-max gap-2 sm:min-w-0 sm:justify-between">
-              {trip.members.map((member, i) => {
-                const row = byId[member.id];
-                const net = row?.netCents ?? 0;
-                const selected = selectedMemberId === member.id;
-                const isMe = meId === member.id;
-                return (
-                  <li
-                    key={member.id}
-                    className="stagger-item min-w-16 flex-1"
-                    style={{ animationDelay: `${i * 40}ms` }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSelectedMemberId((id) => (id === member.id ? null : member.id))
-                      }
-                      className={cn(
-                        "flex w-full flex-col items-center gap-2 rounded-xl px-1 py-2 transition-colors duration-150",
-                        selected ? "bg-chip" : "hover:bg-chip/70",
-                      )}
-                    >
-                      <MemberAvatar member={member} size="lg" selected={selected} />
-                      <span className="max-w-full truncate px-0.5 text-center text-xs font-medium whitespace-nowrap sm:text-sm">
-                        {member.name}
-                        {isMe ? " ·我" : ""}
-                      </span>
-                      <span
-                        className={cn(
-                          "text-xs tabular-nums",
-                          net > 0 && "text-receive",
-                          net < 0 && "text-owe",
-                          net === 0 && "text-subtle",
-                        )}
-                      >
-                        {net > 0 && "收 "}
-                        {net < 0 && "付 "}
-                        {net === 0 ? "平" : formatMoney(Math.abs(net))}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-
-          <section className="mb-6 grid grid-cols-3 gap-2 sm:gap-3">
-            <StatCard
-              label="总支出"
-              value={formatMoney(lifetimeCents)}
-              hint={
-                settlements.length > 0
-                  ? `本期未结 ${formatMoney(ledger.totalCents)}`
-                  : undefined
+      {tab === "mine" ? (
+        !meId ? (
+          <WhoAmI members={trip.members} onSetMe={onSetMe} />
+        ) : (
+          <div>
+            <MineNet cents={myNet} />
+            <ExpenseDayList
+              expenses={myExpenses}
+              meId={meId}
+              membersById={memberMap}
+              onOpen={setDetail}
+              empty={
+                activeExpenses.length === 0
+                  ? "还没有支出。点右下角记一笔。"
+                  : "没有和你相关的账单。"
               }
             />
-            <StatCard label="人均" value={formatMoney(avgCents)} />
-            <StatCard
-              label="待结清"
-              value={formatMoney(ledger.unsettledCents)}
-              hint={
-                ledger.transfers.length === 0
-                  ? openBillCount === 0
-                    ? "本期已结清"
-                    : "本期已平"
-                  : `${ledger.transfers.length} 笔`
-              }
-            />
-          </section>
-
-          <div className="grid gap-4 lg:grid-cols-5">
-            <section className="rounded-2xl bg-surface p-4 shadow-card lg:col-span-3 lg:p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-display text-lg font-semibold">每个人</h2>
-                <Button variant="ghost" size="sm" onClick={() => setMembersOpen(true)}>
-                  <Users className="size-4" />
-                  {variant === "demo" ? "管理" : "成员"}
-                </Button>
-              </div>
-              <ul className="divide-y divide-border">
-                {trip.members.map((member) => {
-                  const row = byId[member.id];
-                  if (!row) return null;
-                  const selected = selectedMemberId === member.id;
-                  const isMe = meId === member.id;
-                  return (
-                    <li key={member.id}>
-                      <div
-                        className={cn(
-                          "flex w-full items-center gap-3 rounded-lg px-1 py-3",
-                          selected ? "bg-chip" : "",
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSelectedMemberId((id) =>
-                              id === member.id ? null : member.id,
-                            )
-                          }
-                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        >
-                          <MemberAvatar member={member} size="md" selected={selected} />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-baseline justify-between gap-2">
-                              <span className="font-medium">
-                                {member.name}
-                                {isMe ? (
-                                  <span className="ml-1 text-xs font-normal text-muted">我</span>
-                                ) : null}
-                              </span>
-                              {row.netCents > 0 && (
-                                <Badge variant="receive">应收 {formatMoney(row.netCents)}</Badge>
-                              )}
-                              {row.netCents < 0 && (
-                                <Badge variant="owe">还要付 {formatMoney(-row.netCents)}</Badge>
-                              )}
-                              {row.netCents === 0 && <Badge variant="settled">已结清</Badge>}
-                            </div>
-                            <p className="mt-1 text-xs text-muted tabular-nums">
-                              已付 {formatMoney(row.paidCents)} · 应付 {formatMoney(row.shareCents)}
-                            </p>
-                          </div>
-                        </button>
-                        {onSetMe && !isMe ? (
-                          <button
-                            type="button"
-                            onClick={() => onSetMe(member.id)}
-                            className="shrink-0 px-2 text-xs text-muted hover:text-fg"
-                          >
-                            这是我
-                          </button>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-
-            <section className="rounded-2xl bg-surface p-4 shadow-card lg:col-span-2 lg:p-5">
-              <div className="mb-4 flex items-center justify-between gap-2">
-                <h2 className="font-display text-lg font-semibold">怎么还</h2>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={openBillCount === 0}
-                  onClick={() => setSettleOpen(true)}
-                >
-                  提前结算
-                </Button>
-              </div>
-              <p className="mb-3 text-xs text-muted">
-                只算还没结算的账单。线下转完后点「提前结算」，对应记录会锁住。
-              </p>
-              {ledger.transfers.length === 0 ? (
-                <p className="text-sm text-muted">
-                  {openBillCount === 0
-                    ? "本期没有未结账单。"
-                    : "本期已经平了，没有人还要付钱。"}
-                </p>
-              ) : (
-                <ul className="space-y-3">
-                  {ledger.transfers.map((t) => {
-                    const from = memberMap[t.fromId];
-                    const to = memberMap[t.toId];
-                    if (!from || !to) return null;
-                    return (
-                      <li
-                        key={`${t.fromId}-${t.toId}`}
-                        className="flex items-center gap-2 rounded-lg bg-bg-elevated px-3 py-2.5"
-                      >
-                        <MemberAvatar member={from} size="sm" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm">
-                            <span className="font-medium">{from.name}</span>
-                            <ArrowRight className="mx-1 inline size-3.5 text-subtle" />
-                            <span className="font-medium">{to.name}</span>
-                          </p>
-                          <p className="text-xs text-muted tabular-nums">
-                            转 {formatMoney(t.cents)}
-                          </p>
-                        </div>
-                        <MemberAvatar member={to} size="sm" />
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {settlements.length > 0 ? (
-                <div className="mt-5 border-t border-border pt-4">
-                  <h3 className="mb-2 text-sm font-medium">已结算</h3>
-                  <ul className="space-y-3">
-                    {settlements.map((settlement, index) => (
-                      <li key={settlement.id} className="rounded-lg bg-bg-elevated px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium">
-                            第 {settlements.length - index} 次提前结算
-                          </p>
-                          <Badge variant="settled">已结算</Badge>
-                        </div>
-                        <p className="mt-1 text-xs text-subtle">
-                          {formatDeletedAt(settlement.createdAt)}
-                          {settlement.createdBy && memberMap[settlement.createdBy]
-                            ? ` · ${memberMap[settlement.createdBy]?.name}`
-                            : ""}
-                          {" · "}
-                          {settlement.expenseIds.length} 笔账单
-                        </p>
-                        {settlement.transfers.length === 0 ? (
-                          <p className="mt-2 text-xs text-muted">当时账已经平了。</p>
-                        ) : (
-                          <ul className="mt-2 space-y-1">
-                            {settlement.transfers.map((t) => (
-                              <li
-                                key={`${settlement.id}-${t.fromId}-${t.toId}`}
-                                className="text-xs text-muted"
-                              >
-                                {memberMap[t.fromId]?.name ?? "未知"}
-                                <ArrowRight className="mx-1 inline size-3 text-subtle" />
-                                {memberMap[t.toId]?.name ?? "未知"}{" "}
-                                <span className="tabular-nums">{formatMoney(t.cents)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </section>
           </div>
-        </>
+        )
       ) : null}
 
       {tab === "all" ? (
-        <section className="mt-4 rounded-2xl bg-surface p-4 shadow-card lg:p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-display text-lg font-semibold">账单</h2>
-            <div className="flex items-center gap-2">
-              <div className="flex rounded-full bg-chip p-0.5">
-                <BillScopeButton
-                  active={billScope === "all"}
-                  onClick={() => setBillScope("all")}
-                >
-                  全部账单
-                </BillScopeButton>
-                <BillScopeButton
-                  active={billScope === "mine"}
-                  onClick={() => setBillScope("mine")}
-                >
-                  与我相关
-                </BillScopeButton>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  downloadMarkdown(exportFileName(trip.name), exportTripMarkdown(trip));
-                  setExported(true);
-                  window.setTimeout(() => setExported(false), 1600);
-                }}
-              >
-                <Download className="size-3.5" />
-                {exported ? "已导出" : "导出记录"}
-              </Button>
-              {variant === "demo" ? <DemoBillActions /> : null}
-            </div>
-          </div>
-          {billScope === "mine" && !meId ? (
-            <p className="py-8 text-center text-sm text-muted">
-              先在上面点「这是我」，或登录后就能只看和你有关的账单。
-            </p>
-          ) : visibleExpenses.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted">
-              {activeExpenses.length === 0
-                ? "还没有支出。点右下角记一笔。"
-                : billScope === "mine"
-                  ? "没有和你相关的账单。"
-                  : "暂时没有账单。"}
-            </p>
-          ) : (
-            <ul className="divide-y divide-border">
-              {visibleExpenses.map((expense) => {
-                const payer = memberMap[expense.payerId];
-                const slices = shareBreakdown(expense);
-                const settled = isSettledExpense(expense);
-                const custom = isCustomSplit(expense);
-                return (
-                  <li key={expense.id} className="flex items-start gap-3 py-3">
-                    <MemberAvatar
-                      member={payer ?? { id: "x", name: "?", avatar: null }}
-                      size="md"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-3">
-                        <p className="flex min-w-0 items-center gap-2">
-                          <span className="truncate font-medium">{expense.title}</span>
-                          {settled ? <Badge variant="settled">已结算</Badge> : null}
-                        </p>
-                        <p className="shrink-0 font-medium tabular-nums">
-                          {formatMoney(expense.amountCents)}
-                        </p>
-                      </div>
-                      <p className="mt-0.5 text-xs text-muted">
-                        {payer?.name ?? "未知"} 付 · {expenseSplitLabel(expense)}
-                        {!custom && expense.participantIds.length > 0 && (
-                          <span className="tabular-nums">
-                            {" "}
-                            · {formatMoney(Math.round(expense.amountCents / expense.participantIds.length))}/人
-                          </span>
-                        )}
-                      </p>
-                      <ul className="mt-2 flex flex-wrap gap-2">
-                        {(custom ? slices : expense.participantIds.map((id) => ({ memberId: id, cents: 0 }))).map(
-                          (slice) => {
-                            const person = memberMap[slice.memberId];
-                            if (!person) return null;
-                            return (
-                              <li
-                                key={slice.memberId}
-                                className="flex w-14 flex-col items-center gap-0.5"
-                              >
-                                <MemberAvatar
-                                  member={person}
-                                  size="sm"
-                                  className="size-7 outline-surface"
-                                />
-                                <span className="w-full truncate text-center text-[11px] leading-tight text-muted">
-                                  {person.name}
-                                </span>
-                                {custom ? (
-                                  <span className="w-full truncate text-center text-[10px] tabular-nums text-subtle">
-                                    {formatMoney(slice.cents)}
-                                  </span>
-                                ) : null}
-                              </li>
-                            );
-                          },
-                        )}
-                      </ul>
-                      <ExpensePhotoStrip photos={expense.photos} className="mt-2" />
-                    </div>
-                    {settled ? (
-                      <span className="mt-1 min-h-10 text-xs text-subtle">已锁</span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setDeleting(expense)}
-                        className="mt-1 min-h-10 text-xs text-subtle hover:text-owe"
-                      >
-                        删除
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {tab === "all" && visibleDeleted.length > 0 ? (
-            <div className="mt-6 border-t border-border pt-4">
-              <h3 className="mb-1 font-display text-base font-semibold">删除记录</h3>
-              <p className="mb-3 text-xs text-muted">
-                已删除的账单不计入结余，但会留下原因，方便以后对账。
-              </p>
-              <ul className="divide-y divide-border">
-                {visibleDeleted.map((expense) => {
-                  const payer = memberMap[expense.payerId];
-                  const deleter = expense.deletedBy
-                    ? memberMap[expense.deletedBy]
-                    : null;
-                  return (
-                    <li key={expense.id} className="py-3">
-                      <div className="flex items-baseline justify-between gap-3">
-                        <p className="truncate text-sm text-muted line-through">
-                          {expense.title}
-                        </p>
-                        <p className="shrink-0 text-sm text-subtle tabular-nums line-through">
-                          {formatMoney(expense.amountCents)}
-                        </p>
-                      </div>
-                      <p className="mt-1 text-xs text-muted">
-                        {payer?.name ?? "未知"} 付 · {expenseSplitLabel(expense)}
-                      </p>
-                      <p className="mt-1.5 text-sm">
-                        <span className="text-owe">删除原因：</span>
-                        {expense.deleteReason || "未填写"}
-                      </p>
-                      <p className="mt-0.5 text-xs text-subtle">
-                        {deleter?.name ?? (expense.deletedBy ? "成员" : "有人")}
-                        {" "}删于 {formatDeletedAt(expense.deletedAt)}
-                      </p>
-                      <ExpensePhotoStrip photos={expense.photos} className="mt-2 opacity-80" />
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+        <div>
+          <ExpenseDayList
+            expenses={activeExpenses}
+            meId={meId}
+            membersById={memberMap}
+            onOpen={setDetail}
+            empty="还没有支出。点右下角记一笔。"
+          />
+          {deletedExpenses.length > 0 ? (
+            <DeletedDayList
+              expenses={deletedExpenses}
+              onOpen={setDetail}
+            />
           ) : null}
-        </section>
+          {variant === "demo" ? <DemoBillActions /> : null}
+        </div>
       ) : null}
 
-      <Separator className="my-8" />
-      <p className="pb-2 text-center text-xs text-subtle">
-        {formatAppVersionLine()}
-        <br />
-        {variant === "demo"
-          ? "这是示例。登录后可建群，邀请朋友用各自的账号一起记。"
-          : "群里每个人登录后都能记账，结余会一起更新。"}
-      </p>
+      {tab === "settle" ? (
+        <SettleTab
+          transfers={ledger.transfers}
+          memberMap={memberMap}
+          openBillCount={openBillCount}
+          settlements={settlements}
+          pastOpen={pastOpen}
+          onTogglePast={() => setPastOpen((v) => !v)}
+          onSettle={() => setSettleOpen(true)}
+        />
+      ) : null}
 
-      {!expenseOpen && !membersOpen && !deleting && !settleOpen && (
+      {!dialogOpen && (
         <Button
           type="button"
           onClick={() => setExpenseOpen(true)}
@@ -668,10 +254,20 @@ export function TripView({
         open={expenseOpen}
         onOpenChange={setExpenseOpen}
         trip={trip}
-        defaultPayerId={meId ?? selectedMemberId ?? trip.members[0]?.id}
+        defaultPayerId={meId ?? trip.members[0]?.id}
         onAdd={onAddExpense}
         onUploadPhoto={onUploadExpensePhoto}
         onDiscardPhotos={onDiscardExpensePhotos}
+      />
+      <ExpenseDetailDialog
+        expense={detail}
+        meId={meId}
+        membersById={memberMap}
+        onClose={() => setDetail(null)}
+        onDelete={(expense) => {
+          setDetail(null);
+          setDeleting(expense);
+        }}
       />
       <DeleteExpenseDialog
         expense={deleting && isOpenExpense(deleting) ? deleting : null}
@@ -707,39 +303,208 @@ export function TripView({
   );
 }
 
-function formatDeletedAt(iso: string | null | undefined): string {
-  if (!iso) return "刚才";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "刚才";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Asia/Shanghai",
-  }).format(date);
-}
-
-function BillScopeButton({
-  active,
-  onClick,
-  children,
+function WhoAmI({
+  members,
+  onSetMe,
 }: {
-  active: boolean;
-  onClick: () => void;
-  children: string;
+  members: Member[];
+  onSetMe?: (id: string) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <section className="rounded-2xl bg-surface p-5 shadow-card">
+      <h2 className="font-display text-lg font-semibold">你是谁？</h2>
+      <ul className="mt-4 flex flex-wrap gap-3">
+        {members.map((member) => (
+          <li key={member.id}>
+            <button
+              type="button"
+              onClick={() => onSetMe?.(member.id)}
+              className="flex w-20 flex-col items-center gap-2 rounded-xl px-2 py-2 hover:bg-chip"
+            >
+              <MemberAvatar member={member} size="lg" />
+              <span className="text-xs font-medium">{member.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function MineNet({ cents }: { cents: number }) {
+  return (
+    <p
       className={cn(
-        "h-8 rounded-full px-3 text-xs font-medium transition-colors",
-        active ? "bg-surface text-fg shadow-card" : "text-muted hover:text-fg",
+        "mb-4 px-1 text-sm font-medium tabular-nums",
+        cents > 0 && "text-receive",
+        cents < 0 && "text-owe",
+        cents === 0 && "text-subtle",
       )}
     >
-      {children}
-    </button>
+      {cents > 0 && `我应收 ${formatMoney(cents)}`}
+      {cents < 0 && `我还要付 ${formatMoney(-cents)}`}
+      {cents === 0 && "已结清"}
+    </p>
+  );
+}
+
+function DeletedDayList({
+  expenses,
+  onOpen,
+}: {
+  expenses: Expense[];
+  onOpen: (expense: Expense) => void;
+}) {
+  return (
+    <div className="mt-8">
+      <h3 className="mb-3 px-1 text-xs font-medium text-muted">删除记录</h3>
+      <div className="space-y-5">
+        {groupByDay(expenses).map((day) => (
+          <section key={day.key}>
+            <h4 className="mb-2 px-1 text-xs text-subtle">{day.label}</h4>
+            <ul className="space-y-2">
+              {day.items.map((expense) => (
+                <li key={expense.id}>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(expense)}
+                    className="flex w-full items-baseline justify-between gap-3 rounded-xl bg-surface px-4 py-3 text-left shadow-card hover:bg-chip/60"
+                  >
+                    <span className="min-w-0 truncate text-sm text-muted line-through">
+                      {expense.title}
+                    </span>
+                    <span className="shrink-0 text-sm text-subtle tabular-nums line-through">
+                      {formatMoney(expense.amountCents)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SettleTab({
+  transfers,
+  memberMap,
+  openBillCount,
+  settlements,
+  pastOpen,
+  onTogglePast,
+  onSettle,
+}: {
+  transfers: { fromId: string; toId: string; cents: number }[];
+  memberMap: Record<string, Member>;
+  openBillCount: number;
+  settlements: ReturnType<typeof tripSettlements>;
+  pastOpen: boolean;
+  onTogglePast: () => void;
+  onSettle: () => void;
+}) {
+  return (
+    <section className="rounded-2xl bg-surface p-4 shadow-card sm:p-5">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h2 className="font-display text-lg font-semibold">谁付给谁</h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={openBillCount === 0}
+          onClick={onSettle}
+        >
+          提前结算
+        </Button>
+      </div>
+      {transfers.length === 0 ? (
+        <p className="text-sm text-muted">
+          {openBillCount === 0 ? "本期没有未结账单。" : "本期已经平了。"}
+        </p>
+      ) : (
+        <ul className="space-y-3">
+          {transfers.map((t) => {
+            const from = memberMap[t.fromId];
+            const to = memberMap[t.toId];
+            if (!from || !to) return null;
+            return (
+              <li
+                key={`${t.fromId}-${t.toId}`}
+                className="flex items-center gap-2 rounded-lg bg-bg-elevated px-3 py-2.5"
+              >
+                <MemberAvatar member={from} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">
+                    <span className="font-medium">{from.name}</span>
+                    <ArrowRight className="mx-1 inline size-3.5 text-subtle" />
+                    <span className="font-medium">{to.name}</span>
+                  </p>
+                  <p className="text-xs text-muted tabular-nums">
+                    转 {formatMoney(t.cents)}
+                  </p>
+                </div>
+                <MemberAvatar member={to} size="sm" />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {settlements.length > 0 ? (
+        <div className="mt-5 border-t border-border pt-3">
+          <button
+            type="button"
+            onClick={onTogglePast}
+            className="flex w-full items-center justify-between gap-2 py-1 text-left text-sm font-medium"
+          >
+            <span>已结算 {settlements.length} 次</span>
+            <ChevronDown
+              className={cn(
+                "size-4 text-subtle transition-transform",
+                pastOpen && "rotate-180",
+              )}
+            />
+          </button>
+          {pastOpen ? (
+            <ul className="mt-3 space-y-3">
+              {settlements.map((settlement, index) => (
+                <li key={settlement.id} className="rounded-lg bg-bg-elevated px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium">
+                      第 {settlements.length - index} 次
+                    </p>
+                    <Badge variant="settled">已结算</Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-subtle">
+                    {formatStamp(settlement.createdAt) || "刚才"}
+                    {settlement.createdBy && memberMap[settlement.createdBy]
+                      ? ` · ${memberMap[settlement.createdBy]?.name}`
+                      : ""}
+                    {` · ${settlement.expenseIds.length} 笔`}
+                  </p>
+                  {settlement.transfers.length === 0 ? (
+                    <p className="mt-2 text-xs text-muted">当时账已经平了。</p>
+                  ) : (
+                    <ul className="mt-2 space-y-1">
+                      {settlement.transfers.map((t) => (
+                        <li
+                          key={`${settlement.id}-${t.fromId}-${t.toId}`}
+                          className="text-xs text-muted"
+                        >
+                          {memberMap[t.fromId]?.name ?? "未知"}
+                          <ArrowRight className="mx-1 inline size-3 text-subtle" />
+                          {memberMap[t.toId]?.name ?? "未知"}{" "}
+                          <span className="tabular-nums">{formatMoney(t.cents)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -756,6 +521,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         "h-9 flex-1 rounded-full text-sm font-medium transition-colors",
         active ? "bg-surface text-fg shadow-card" : "text-muted hover:text-fg",
@@ -770,7 +536,7 @@ function DemoBillActions() {
   const clearExpenses = useTripStore((s) => s.clearExpenses);
   const resetDemo = useTripStore((s) => s.resetDemo);
   return (
-    <div className="flex items-center gap-1">
+    <div className="mt-6 flex items-center justify-end gap-1">
       <Button variant="ghost" size="sm" onClick={() => clearExpenses()}>
         清空
       </Button>
@@ -778,26 +544,6 @@ function DemoBillActions() {
         <RotateCcw className="size-3.5" />
         示例
       </Button>
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
-  return (
-    <div className="rounded-xl bg-surface px-3 py-3 shadow-card sm:px-4 sm:py-4">
-      <p className="text-xs text-muted">{label}</p>
-      <p className="mt-1 font-display text-lg font-semibold tracking-tight tabular-nums sm:text-2xl">
-        {value}
-      </p>
-      {hint ? <p className="mt-1 text-xs text-subtle">{hint}</p> : null}
     </div>
   );
 }
