@@ -84,6 +84,8 @@ export function ExpenseDetailDialog({
                 </p>
               ) : null}
 
+              <ExpensePhotoStrip photos={expense.photos} />
+
               <ul className="space-y-2">
                 {slices.map((slice) => {
                   const person = membersById[slice.memberId];
@@ -111,8 +113,6 @@ export function ExpenseDetailDialog({
                   );
                 })}
               </ul>
-
-              <ExpensePhotoStrip photos={expense.photos} />
 
               {canDelete ? (
                 <Button

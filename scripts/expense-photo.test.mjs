@@ -8,6 +8,24 @@ function isExpensePhotoId(value) {
   return PHOTO_ID_RE.test(value);
 }
 
+function photoVersionToken(version) {
+  if (version instanceof Date && !Number.isNaN(version.getTime())) {
+    return String(version.getTime());
+  }
+  const raw = String(version).trim();
+  if (!raw) return "1";
+  if (/^[A-Za-z0-9._-]+$/.test(raw)) return raw;
+  let normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+  const ms = Date.parse(normalized);
+  if (Number.isFinite(ms)) return String(ms);
+  return raw.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "1";
+}
+
+function expensePhotoPublicUrl(photoId, version) {
+  return `/api/expense-photo/${encodeURIComponent(photoId)}?v=${photoVersionToken(version)}`;
+}
+
 function safePhotoUrl(url) {
   if (
     url.startsWith("data:image/jpeg;base64,") ||
@@ -15,8 +33,21 @@ function safePhotoUrl(url) {
   ) {
     return url;
   }
-  if (/^\/api\/expense-photo\/[A-Za-z0-9_-]{8,80}(\?v=[A-Za-z0-9._-]+)?$/.test(url)) {
-    return url;
+  const photoMatch = /^\/api\/expense-photo\/([A-Za-z0-9_-]{8,80})(\?.*)?$/.exec(
+    url,
+  );
+  if (photoMatch) {
+    const id = photoMatch[1];
+    const query = photoMatch[2] ?? "";
+    const versionPair = query.startsWith("?")
+      ? query.slice(1).split("&").find((part) => part.startsWith("v="))
+      : undefined;
+    if (!versionPair) return `/api/expense-photo/${id}`;
+    try {
+      return expensePhotoPublicUrl(id, decodeURIComponent(versionPair.slice(2)));
+    } catch {
+      return `/api/expense-photo/${id}`;
+    }
   }
   if (/^\/avatars\/[A-Za-z0-9._-]+$/.test(url)) {
     return url;
@@ -65,6 +96,21 @@ test("safe photo urls only allow same-origin, demo avatars, or jpeg data", () =>
   assert.equal(safePhotoUrl("javascript:alert(1)"), null);
   assert.equal(safePhotoUrl("https://evil.example/x.jpg"), null);
   assert.equal(safePhotoUrl("/api/expense-photo/../secret"), null);
+});
+
+test("postgres timestamptz cache tokens still render as photos", () => {
+  const id = "550e8400-e29b-41d4-a716-446655440000";
+  const pgText = expensePhotoPublicUrl(id, "2026-09-20 07:05:12.123456+00");
+  const iso = expensePhotoPublicUrl(id, "2026-09-20T07:05:12.123Z");
+  assert.match(pgText, /^\/api\/expense-photo\/550e8400-e29b-41d4-a716-446655440000\?v=\d+$/);
+  assert.match(iso, /^\/api\/expense-photo\/550e8400-e29b-41d4-a716-446655440000\?v=\d+$/);
+  assert.equal(safePhotoUrl(pgText), pgText);
+  assert.equal(safePhotoUrl(`/api/expense-photo/${id}?v=2026-09-20 07:05:12.123456+00`), pgText);
+  const normalized = normalizeExpensePhotos([
+    { id, url: `/api/expense-photo/${id}?v=2026-09-20 07:05:12.123456+00` },
+  ]);
+  assert.equal(normalized?.length, 1);
+  assert.equal(normalized?.[0]?.url, pgText);
 });
 
 test("normalize photos drops junk, duplicates, and caps at 9", () => {

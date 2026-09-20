@@ -2,12 +2,33 @@ import type { ExpensePhoto } from "./types";
 
 export const MAX_EXPENSE_PHOTOS = 9;
 
+/**
+ * Cache-busting token that stays inside `safePhotoUrl`'s allowed charset.
+ * `loadGroup` used to pass Postgres `timestamptz::text` (spaces, colons, `+00`),
+ * which the allow-list dropped — so saved bills showed a photo count but no
+ * images after you opened them.
+ */
+export function photoVersionToken(version: string | number | Date): string {
+  if (version instanceof Date && !Number.isNaN(version.getTime())) {
+    return String(version.getTime());
+  }
+  const raw = String(version).trim();
+  if (!raw) return "1";
+  if (/^[A-Za-z0-9._-]+$/.test(raw)) return raw;
+  let normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  // Postgres `timestamptz::text` often uses `+00` instead of `+00:00`.
+  normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+  const ms = Date.parse(normalized);
+  if (Number.isFinite(ms)) return String(ms);
+  return raw.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "1";
+}
+
 /** Public URL stored on the expense. Bytes live in `group_expense_photos`. */
 export function expensePhotoPublicUrl(
   photoId: string,
-  version: string | number,
+  version: string | number | Date,
 ): string {
-  return `/api/expense-photo/${encodeURIComponent(photoId)}?v=${version}`;
+  return `/api/expense-photo/${encodeURIComponent(photoId)}?v=${photoVersionToken(version)}`;
 }
 
 export const PHOTO_ID_RE = /^[A-Za-z0-9_-]{8,80}$/;
@@ -58,8 +79,21 @@ export function safePhotoUrl(url: string): string | null {
   ) {
     return url;
   }
-  if (/^\/api\/expense-photo\/[A-Za-z0-9_-]{8,80}(\?v=[A-Za-z0-9._-]+)?$/.test(url)) {
-    return url;
+  const photoMatch = /^\/api\/expense-photo\/([A-Za-z0-9_-]{8,80})(\?.*)?$/.exec(
+    url,
+  );
+  if (photoMatch) {
+    const id = photoMatch[1];
+    const query = photoMatch[2] ?? "";
+    const versionPair = query.startsWith("?")
+      ? query.slice(1).split("&").find((part) => part.startsWith("v="))
+      : undefined;
+    if (!versionPair) return `/api/expense-photo/${id}`;
+    try {
+      return expensePhotoPublicUrl(id, decodeURIComponent(versionPair.slice(2)));
+    } catch {
+      return `/api/expense-photo/${id}`;
+    }
   }
   if (/^\/avatars\/[A-Za-z0-9._-]+$/.test(url)) {
     return url;
