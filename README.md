@@ -4,7 +4,7 @@
 
 ## 给任何人用
 
-- **账号**：邮箱注册 / 登录。每个人用自己的账号。
+- **账号**：邮箱注册 / 登录。每个人用自己的账号。忘了密码可以在登录页用邮箱验证码改。
 - **群组**：登录后新建群组，把邀请码发给同行。对方登录后加入，就能一起记账。
 - **与我相关**：看你垫了哪些大头、每个人该还你多少、你在别处还要摊多少。
 - **自定义分摊**：记账时可以平均 AA，也可以按人填不同价格。
@@ -51,6 +51,7 @@ npm run dev                   # http://localhost:8080
 | --- | --- |
 | 登录后刷新又变成未登录 | 请用 `http://localhost:8080` 访问。会话 Cookie 带 `Secure` 标志，浏览器只对 `localhost` 放行 http；用局域网 IP（如 `http://192.168.x.x:8080`）打开时 Cookie 会被丢弃。手机联调请用 https 反向代理或 `localhost` 端口转发。 |
 | 登录报来源校验失败 | 地址栏 origin 必须在白名单里（含协议、端口，无末尾 `/`）。自定义域名要写进 `BETTER_AUTH_URL` 或 `BETTER_AUTH_TRUSTED_ORIGINS`，不要只填 Vercel 域名。 |
+| 忘记密码提示发不了验证码 | 线上要配 `EMAIL_FROM` + `RESEND_API_KEY`（或 SMTP）。本地没配时验证码会打在跑 `npm run dev` 的终端里。 |
 | `npm run db:migrate` 连不上 | 确认 `docker compose ps` 里 db 是 healthy；`DATABASE_URL` 的端口 / 密码和 compose 文件一致。 |
 | 重启后账号全没了 | 没配 `DATABASE_URL`，跑在内存 PGLite 上。按上面第 2、3 步接上 Postgres。 |
 
@@ -89,6 +90,13 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 | `BETTER_AUTH_URL` | 自定义域名时建议 | 用户实际打开的 origin，不要末尾斜杠。绑了 `www.example.com` 就填 `https://www.example.com`，不要只填 `https://xxx.vercel.app`。 |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | 多个域名时建议 | 额外信任的登录来源，逗号分隔，例如 `https://www.example.com,https://xxx.vercel.app`。 |
 | `VITE_AUTH_ENABLED` | 可选 | 默认开启登录。只有本地调试才设成 `false`。 |
+| `EMAIL_FROM` | 发验证码时必需 | 发件人，如 `途账 <noreply@yourdomain.com>`。 |
+| `RESEND_API_KEY` | 发信二选一 | [Resend](https://resend.com) API Key。Vercel 上推荐这条（走 HTTPS）。 |
+| `SMTP_HOST` | 发信二选一 | SMTP 主机，如 `smtp.qq.com`。和 Resend 同时配时走 Resend。 |
+| `SMTP_PORT` | 可选 | 默认 `587`。QQ / 163 常用 `465`。 |
+| `SMTP_SECURE` | 可选 | `465` 默认加密。`587` 会先连明文再 STARTTLS。 |
+| `SMTP_USER` / `SMTP_PASS` | SMTP 时通常要 | QQ / 163 填授权码，不是登录密码。 |
+| `EMAIL_OTP_ALLOW_LOG` | 本地调试 | `true` 时不发信、把验证码打到服务器日志。线上不要开。 |
 
 ### 3. 在 Vercel 导入仓库
 
@@ -103,6 +111,7 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 ### 4. 上线后怎么用
 
 - 打开站点 → **登录** → **注册**（邮箱 + 至少 8 位密码）。
+- 忘了密码：登录页点 **忘记密码**，填邮箱收 6 位验证码，再设新密码。
 - 建群、发邀请码 `/join/<code>`，同行用自己的账号加入。
 
 ### 常见问题
