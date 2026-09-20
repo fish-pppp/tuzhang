@@ -1,11 +1,6 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-  GROK_PROVIDERS,
-  authClient,
-  authEnabled,
-  signIn,
-} from "@/lib/auth/client";
+import { authClient, authEnabled } from "@/lib/auth/client";
 import { emailAndPasswordEnabled } from "@/lib/auth/email-password";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { friendlyAuthError } from "@/lib/errors";
@@ -26,7 +21,6 @@ export const Route = createFileRoute("/login")({
 
 function Login() {
   const { redirect } = Route.useSearch();
-  const callbackURL = redirect ?? "/";
   const { user, isPending: sessionPending } = useCurrentUserState();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -34,6 +28,7 @@ function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const emailLoginOn = authEnabled && emailAndPasswordEnabled;
 
   // Already signed in (e.g. pressed Back onto /login): skip the form.
   useEffect(() => {
@@ -94,33 +89,11 @@ function Login() {
           登录后进入你的账本
         </h1>
         <p className="mt-2 text-sm text-muted">
-          每个人用自己的账号。登录后会打开你创建的分组；也可以再新建或加入别人的群。
+          用邮箱注册或登录。登录后会打开你创建的分组；也可以再新建或加入别人的群。
         </p>
-        <div className="mt-6 space-y-2">
-          {authEnabled ? (
-            GROK_PROVIDERS.map((p) => (
-              <Button
-                key={p.providerId}
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={() => signIn(p.providerId, { callbackURL })}
-              >
-                使用 {p.label} 继续
-              </Button>
-            ))
-          ) : (
-            <p className="text-sm text-muted">登录已关闭。</p>
-          )}
-        </div>
 
-        {authEnabled && emailAndPasswordEnabled ? (
-          <>
-            <div className="my-5 flex items-center gap-3 text-xs text-subtle">
-              <span className="h-px flex-1 bg-border" />
-              或用邮箱
-              <span className="h-px flex-1 bg-border" />
-            </div>
+        {emailLoginOn ? (
+          <div className="mt-6">
             <div className="mb-3 flex rounded-full bg-chip p-1">
               <button
                 type="button"
@@ -186,8 +159,10 @@ function Login() {
                 {pending ? "请稍候…" : mode === "signup" ? "注册并进入" : "登录"}
               </Button>
             </form>
-          </>
-        ) : null}
+          </div>
+        ) : (
+          <p className="mt-6 text-sm text-muted">登录已关闭。</p>
+        )}
 
         <Link
           to="/"

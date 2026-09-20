@@ -1,6 +1,7 @@
 /**
- * Local email/password sign-in (this app's Better Auth DB — not the broker).
+ * Local email/password is the only sign-in method.
  *
- * Do NOT edit `server.ts` for this — that file is frozen pre-wired config.
+ * Flip to `false` only when you need to disable credential auth entirely
+ * (`VITE_AUTH_ENABLED=false` is the usual off-switch instead).
  */
 export const emailAndPasswordEnabled = true;

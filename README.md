@@ -4,7 +4,7 @@
 
 ## 给任何人用
 
-- **账号**：Google、X，或邮箱注册。每个人用自己的账号。
+- **账号**：邮箱注册 / 登录。每个人用自己的账号。
 - **群组**：登录后新建群组，把邀请码发给同行。对方登录后加入，就能一起记账。
 - **与我相关**：看你垫了哪些大头、每个人该还你多少、你在别处还要摊多少。
 - **自定义分摊**：记账时可以平均 AA，也可以按人填不同价格。
@@ -52,7 +52,6 @@ npm run dev                   # http://localhost:8080
 | 登录报「Invalid origin」 | 地址栏 origin 必须和 `.env` 里 `BETTER_AUTH_URL` 一致（含协议、端口，无末尾 `/`）。 |
 | `npm run db:migrate` 连不上 | 确认 `docker compose ps` 里 db 是 healthy；`DATABASE_URL` 的端口 / 密码和 compose 文件一致。 |
 | 重启后账号全没了 | 没配 `DATABASE_URL`，跑在内存 PGLite 上。按上面第 2、3 步接上 Postgres。 |
-| Google / X 按钮点了报错 | 没有 `GROK_AUTH_*` 密钥时属预期行为，用邮箱注册即可。 |
 
 ### 检查命令
 
@@ -88,7 +87,6 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 | `BETTER_AUTH_SECRET` | 线上必需 | 登录会话签名密钥。每个 Serverless 实例不能各自随机，否则会掉登录。 |
 | `BETTER_AUTH_URL` | 自定义域名时建议 | 站点公网 origin，不要末尾斜杠，例如 `https://tuzhang.vercel.app`。不填则自动用 Vercel 部署域名。 |
 | `VITE_AUTH_ENABLED` | 可选 | 默认开启登录。只有本地调试才设成 `false`。 |
-| `GROK_AUTH_ISSUER` / `GROK_AUTH_CLIENT_ID` / `GROK_AUTH_CLIENT_SECRET` | 可选 | Grok 登录中转（Google / X）。自己部署时一般没有这些密钥，**请用邮箱注册**。 |
 
 ### 3. 在 Vercel 导入仓库
 
@@ -104,7 +102,6 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 
 - 打开站点 → **登录** → **注册**（邮箱 + 至少 8 位密码）。
 - 建群、发邀请码 `/join/<code>`，同行用自己的账号加入。
-- Google / X 按钮在没有 `GROK_AUTH_*` 时会失败，这是预期行为。
 
 ### 常见问题
 
