@@ -114,6 +114,13 @@ export type PersonalBook = {
   transfersOut: Transfer[];
 };
 
+export {
+  groupChipByPayer,
+  groupOthersOweByPerson,
+  sortRowsByNewest,
+} from "./aa-groups.mjs";
+export type { PersonAaGroup } from "./aa-groups.mjs";
+
 export function personalBook(trip: Trip, memberId: string): PersonalBook | null {
   const ledger = computeLedger(trip);
   const me = ledger.perPerson.find((p) => p.memberId === memberId);
