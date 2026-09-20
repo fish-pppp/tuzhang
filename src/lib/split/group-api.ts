@@ -8,8 +8,21 @@ import { homeGroupName } from "./home-group";
 import { assertCanRemoveMember } from "./member-rules";
 import { newId } from "./money";
 import { buildSettlement } from "./settlement";
+import {
+  expensePhotoPublicUrl,
+  isExpensePhotoId,
+  MAX_EXPENSE_PHOTOS,
+} from "./photo";
 import { normalizeExpenseShares } from "./shares";
-import type { Expense, ExpenseShare, Member, Settlement, Transfer, Trip } from "./types";
+import type {
+  Expense,
+  ExpensePhoto,
+  ExpenseShare,
+  Member,
+  Settlement,
+  Transfer,
+  Trip,
+} from "./types";
 
 export type GroupSummary = {
   id: string;
@@ -156,8 +169,30 @@ async function loadGroupTrip(
     }
     sharesByExpense.set(row.expense_id, list);
   }
+  const photoRows = await sql<{
+    id: string;
+    expense_id: string;
+    created_at: string;
+  }>`
+    select id, expense_id, created_at::text as created_at
+    from group_expense_photos
+    where group_id = ${groupId}
+      and expense_id is not null
+    order by sort_order asc, created_at asc
+  `;
+  const photosByExpense = new Map<string, ExpensePhoto[]>();
+  for (const row of photoRows) {
+    const list = photosByExpense.get(row.expense_id) ?? [];
+    if (list.length >= MAX_EXPENSE_PHOTOS) continue;
+    list.push({
+      id: row.id,
+      url: expensePhotoPublicUrl(row.id, row.created_at),
+    });
+    photosByExpense.set(row.expense_id, list);
+  }
   const expenses: Expense[] = expenseRows.map((e) => {
     const packed = sharesByExpense.get(e.id);
+    const photos = photosByExpense.get(e.id);
     return {
       id: e.id,
       title: e.title,
@@ -167,6 +202,7 @@ async function loadGroupTrip(
       ...(packed && packed.custom.length === packed.ids.length && packed.custom.length > 0
         ? { shares: packed.custom }
         : {}),
+      ...(photos && photos.length > 0 ? { photos } : {}),
       createdAt: e.created_at,
       deletedAt: e.deleted_at,
       deletedBy: e.deleted_by,
@@ -507,6 +543,7 @@ export const addGroupExpense = createServerFn({ method: "POST" })
             }),
           )
           .optional(),
+        photoIds: z.array(z.string().min(8).max(80)).max(MAX_EXPENSE_PHOTOS).optional(),
       })
       .parse(data),
   )
@@ -548,9 +585,30 @@ export const addGroupExpense = createServerFn({ method: "POST" })
           select ${id}, unnest(${participants}::text[])
         `;
       }
+      const photoIds = [...new Set(data.photoIds ?? [])]
+        .filter(isExpensePhotoId)
+        .slice(0, MAX_EXPENSE_PHOTOS);
+      if (photoIds.length > 0) {
+        const orders = photoIds.map((_, i) => i);
+        const attached = await sql<{ id: string }>`
+          update group_expense_photos as p
+          set expense_id = ${id},
+              sort_order = t.sort_order
+          from unnest(${photoIds}::text[], ${orders}::int[]) as t(id, sort_order)
+          where p.id = t.id
+            and p.group_id = ${data.groupId}
+            and p.uploaded_by = ${context.userId}
+            and p.expense_id is null
+          returning p.id
+        `;
+        if (attached.length !== photoIds.length) {
+          throw new Error("有照片对不上，请重新添加后再记");
+        }
+      }
     } catch (err) {
       // No transaction on the shared Sql surface: undo the header row so a
       // failed share insert can't leave an expense nobody is splitting.
+      // Photos use ON DELETE SET NULL, so a failed attach can be retried.
       await sql`delete from group_expenses where id = ${id}`.catch(() => undefined);
       throw err;
     }

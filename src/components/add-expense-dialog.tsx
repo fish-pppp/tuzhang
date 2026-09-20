@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check } from "lucide-react";
+import { ExpensePhotoPicker } from "@/components/expense-photos";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,9 +12,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MemberAvatar } from "@/components/member-avatar";
-import { formatMoney, parseYuan } from "@/lib/split/money";
+import { formatMoney, newId, parseYuan } from "@/lib/split/money";
+import {
+  compressExpensePhoto,
+  MAX_EXPENSE_PHOTOS,
+  normalizeExpensePhotos,
+} from "@/lib/split/photo";
 import { equalShares, normalizeExpenseShares } from "@/lib/split/shares";
-import type { Expense, ExpenseShare, Trip } from "@/lib/split/types";
+import type { Expense, ExpensePhoto, ExpenseShare, Trip } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
 
 type SplitMode = "equal" | "custom";
@@ -24,6 +30,8 @@ export function AddExpenseDialog({
   trip,
   defaultPayerId,
   onAdd,
+  onUploadPhoto,
+  onDiscardPhotos,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -35,6 +43,8 @@ export function AddExpenseDialog({
       "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
     >,
   ) => void | Promise<void>;
+  onUploadPhoto?: (base64: string) => Promise<ExpensePhoto>;
+  onDiscardPhotos?: (ids: string[]) => void | Promise<void>;
 }) {
   const fallbackPayer = defaultPayerId ?? trip.members[0]?.id ?? "";
   const [title, setTitle] = useState("");
@@ -47,6 +57,11 @@ export function AddExpenseDialog({
   const [customYuan, setCustomYuan] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [photos, setPhotos] = useState<ExpensePhoto[]>([]);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photosRef = useRef<ExpensePhoto[]>([]);
+  const submittedRef = useRef(false);
+  photosRef.current = photos;
 
   function fillEqualCustom(ids: string[], yuan: string) {
     const cents = parseYuan(yuan);
@@ -72,6 +87,9 @@ export function AddExpenseDialog({
     setCustomYuan({});
     setError(null);
     setPending(false);
+    setPhotos([]);
+    setPhotoBusy(false);
+    submittedRef.current = false;
   }, [open, defaultPayerId, trip.members]);
 
   const allSelected = participantIds.length === trip.members.length;
@@ -105,6 +123,50 @@ export function AddExpenseDialog({
     setCustomYuan({});
     setError(null);
     setPending(false);
+    setPhotos([]);
+    setPhotoBusy(false);
+  }
+
+  async function discardRemote(ids: string[]) {
+    if (!onDiscardPhotos || ids.length === 0) return;
+    try {
+      await onDiscardPhotos(ids);
+    } catch {
+      // Closing the form should still succeed if cleanup fails.
+    }
+  }
+
+  async function onPickFiles(list: FileList) {
+    const room = MAX_EXPENSE_PHOTOS - photosRef.current.length;
+    if (room <= 0) {
+      setError(`最多 ${MAX_EXPENSE_PHOTOS} 张照片`);
+      return;
+    }
+    const files = [...list].slice(0, room);
+    setPhotoBusy(true);
+    setError(null);
+    try {
+      for (const file of files) {
+        const base64 = await compressExpensePhoto(file);
+        const photo = onUploadPhoto
+          ? await onUploadPhoto(base64)
+          : { id: newId(), url: `data:image/jpeg;base64,${base64}` };
+        setPhotos((prev) => {
+          if (prev.length >= MAX_EXPENSE_PHOTOS) return prev;
+          if (prev.some((item) => item.id === photo.id)) return prev;
+          return [...prev, photo];
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "照片处理失败");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  function onRemovePhoto(id: string) {
+    setPhotos((prev) => prev.filter((photo) => photo.id !== id));
+    void discardRemote([id]);
   }
 
   function toggleParticipant(id: string) {
@@ -147,13 +209,16 @@ export function AddExpenseDialog({
     }
     setPending(true);
     try {
+      const attached = normalizeExpensePhotos(photos);
       await onAdd({
         title: title.trim() || "未命名支出",
         amountCents: cents,
         payerId,
         participantIds,
         ...(shares ? { shares } : {}),
+        ...(attached ? { photos: attached } : {}),
       });
+      submittedRef.current = true;
       resetForm();
       onOpenChange(false);
     } catch (err) {
@@ -167,7 +232,12 @@ export function AddExpenseDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) resetForm();
+        if (!next) {
+          if (!submittedRef.current) {
+            void discardRemote(photosRef.current.map((photo) => photo.id));
+          }
+          resetForm();
+        }
         onOpenChange(next);
       }}
     >
@@ -175,7 +245,7 @@ export function AddExpenseDialog({
         <DialogHeader>
           <DialogTitle>记一笔</DialogTitle>
           <DialogDescription>
-            谁先垫了钱。可以平均 AA，也可以按人填不同的价。
+            谁先垫了钱。可以平均 AA，也可以按人填不同的价。小票可以附多张照片。
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void onSubmit(e)} className="flex min-h-0 flex-col gap-5 overflow-y-auto">
@@ -355,10 +425,25 @@ export function AddExpenseDialog({
             ) : null}
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="expense-photos">照片证明</Label>
+            <ExpensePhotoPicker
+              photos={photos}
+              disabled={pending}
+              pending={photoBusy}
+              onPickFiles={(files) => void onPickFiles(files)}
+              onRemove={onRemovePhoto}
+            />
+          </div>
+
           {error && <p className="text-sm text-owe">{error}</p>}
 
-          <Button type="submit" className="h-12 w-full rounded-lg text-base" disabled={pending}>
-            {pending ? "记账中…" : "记入账单"}
+          <Button
+            type="submit"
+            className="h-12 w-full rounded-lg text-base"
+            disabled={pending || photoBusy}
+          >
+            {pending ? "记账中…" : photoBusy ? "处理照片…" : "记入账单"}
           </Button>
         </form>
       </DialogContent>

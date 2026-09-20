@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { ExpensePhotoStrip } from "@/components/expense-photos";
 import { MemberAvatar } from "@/components/member-avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -210,6 +211,7 @@ function PaidSection({
               <p className="mt-1 text-xs text-muted">
                 {expenseSplitLabel(expense)}
               </p>
+              <ExpensePhotoStrip photos={expense.photos} className="mt-2" />
               <div className="mt-3 flex items-baseline justify-between gap-3">
                 <span className="text-sm text-muted">我A了</span>
                 <span className="font-display text-xl font-semibold tabular-nums">
@@ -321,6 +323,7 @@ function ChipSection({
                 />
                 <div className="min-w-0 flex-1">
                   <ExpenseHead expense={expense} hideAmount />
+                  <ExpensePhotoStrip photos={expense.photos} className="mt-2" />
                   <p className="mt-1 text-xs text-muted">
                     {payer?.name ?? "未知"} 先付 {formatMoney(expense.amountCents)}
                     {n > 0 ? ` · ${expenseSplitLabel(expense)}` : ""}

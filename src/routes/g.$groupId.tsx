@@ -14,6 +14,7 @@ import {
   settleGroup,
   updateMyName,
 } from "@/lib/split/group-api";
+import { discardExpensePhotos, uploadExpensePhoto } from "@/lib/split/photo-api";
 
 export const Route = createFileRoute("/g/$groupId")({
   component: GroupPage,
@@ -115,10 +116,17 @@ function GroupPage() {
               payerId: input.payerId,
               participantIds: input.participantIds,
               shares: input.shares,
+              photoIds: input.photos?.map((photo) => photo.id),
             },
           });
           await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
           await queryClient.invalidateQueries({ queryKey: ["groups"] });
+        }}
+        onUploadExpensePhoto={(base64) =>
+          uploadExpensePhoto({ data: { groupId, base64 } })
+        }
+        onDiscardExpensePhotos={async (photoIds) => {
+          await discardExpensePhotos({ data: { groupId, photoIds } });
         }}
         onSettle={async () => {
           await settleGroup({ data: { groupId } });

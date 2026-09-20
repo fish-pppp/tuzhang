@@ -9,6 +9,12 @@ export type ExpenseShare = {
   cents: number;
 };
 
+export type ExpensePhoto = {
+  id: string;
+  /** Same-origin `/api/expense-photo/<id>` or a compressed JPEG data URL (demo). */
+  url: string;
+};
+
 export type Expense = {
   id: string;
   title: string;
@@ -20,6 +26,8 @@ export type Expense = {
    * Omitted/empty means split the total evenly among `participantIds`.
    */
   shares?: ExpenseShare[];
+  /** Optional receipt / proof photos. Omitted/empty means none. */
+  photos?: ExpensePhoto[];
   createdAt: string;
   /** Set when the bill is soft-deleted; omitted/empty means still active. */
   deletedAt?: string | null;

@@ -45,6 +45,10 @@ function expenseBlock(
     `- 分摊：${expenseSplitLabel(expense)}${isCustomSplit(expense) ? "（不是人均 AA）" : ""}`,
     `- 记账：${shanghaiStamp(expense.createdAt)}`,
   ];
+  const photoCount = expense.photos?.length ?? 0;
+  if (photoCount > 0) {
+    lines.push(`- 照片证明：${photoCount} 张`);
+  }
   if (isSettledExpense(expense)) {
     lines.push("- 状态：已结算（线下结清，账单已锁定）");
   } else if (!isActiveExpense(expense)) {
