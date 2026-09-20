@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Member } from "@/lib/split/types";
 
-type Size = "sm" | "md" | "lg";
+type Size = "xs" | "sm" | "md" | "lg";
 
 const sizeClass: Record<Size, string> = {
+  xs: "size-6 text-[10px]",
   sm: "size-8 text-xs",
   md: "size-12 text-sm",
   lg: "size-14 text-lg sm:size-20 sm:text-xl",

@@ -24,10 +24,7 @@ export function MyGroupsPanel() {
   if (isPending) {
     return (
       <section className="mb-6 rounded-2xl bg-surface p-4 shadow-card sm:p-5">
-        <h2 className="font-display text-lg font-semibold">和朋友一起记</h2>
-        <p className="mt-1 text-sm text-muted">
-          登录后建一个群，把邀请码发给同行。每个人用自己的账号加入，一起记垫付和 AA。
-        </p>
+        <h2 className="font-display text-lg font-semibold">我的群组</h2>
         <div className="mt-3 h-10 w-28 animate-pulse rounded-full bg-chip" />
       </section>
     );
@@ -36,10 +33,7 @@ export function MyGroupsPanel() {
   if (!user) {
     return (
       <section className="mb-6 rounded-2xl bg-surface p-4 shadow-card sm:p-5">
-        <h2 className="font-display text-lg font-semibold">和朋友一起记</h2>
-        <p className="mt-1 text-sm text-muted">
-          登录后建一个群，把邀请码发给同行。每个人用自己的账号加入，一起记垫付和 AA。
-        </p>
+        <h2 className="font-display text-lg font-semibold">我的群组</h2>
         <Link
           to="/login"
           search={{ redirect: undefined }}
@@ -54,10 +48,7 @@ export function MyGroupsPanel() {
   return (
     <section className="mb-6 rounded-2xl bg-surface p-4 shadow-card sm:p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <div>
-          <h2 className="font-display text-lg font-semibold">我的群组</h2>
-          <p className="text-xs text-muted">真实账号协作，下面示例只存在这台设备。</p>
-        </div>
+        <h2 className="font-display text-lg font-semibold">我的群组</h2>
         <div className="flex shrink-0 gap-1">
           <Button variant="ghost" size="sm" onClick={() => setJoinOpen(true)}>
             <UserPlus className="size-3.5" />
@@ -112,10 +103,6 @@ export function MyGroupsPanel() {
           ))}
         </ul>
       )}
-
-      {groups.length > 0 ? (
-        <p className="mt-3 text-xs text-subtle">点进群组后，切到「我的A款」看你A了哪些钱、还要A多少。</p>
-      ) : null}
 
       <CreateGroupDialog open={createOpen} onOpenChange={setCreateOpen} />
       <JoinGroupDialog open={joinOpen} onOpenChange={setJoinOpen} />
