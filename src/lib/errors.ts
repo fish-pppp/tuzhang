@@ -16,7 +16,11 @@ const AUTH_MESSAGES: Array<[RegExp, string]> = [
   [/invalid email/i, "邮箱格式不对"],
   [/password too short|at least 8/i, "密码至少 8 位"],
   [/password too long/i, "密码太长了"],
-  [/invalid origin|forbidden/i, "登录来源校验失败：请用与 BETTER_AUTH_URL 一致的地址访问"],
+  [
+    /invalid origin/i,
+    "登录来源校验失败：当前网址不在白名单。请用和 BETTER_AUTH_URL 完全一致的地址打开（含 https，不要末尾 /）。自定义域名请写进 BETTER_AUTH_URL 或 BETTER_AUTH_TRUSTED_ORIGINS",
+  ],
+  [/forbidden/i, "请求被拒绝，请刷新后再试"],
   [/failed to fetch|network|load failed/i, "网络不通，请稍后再试"],
   [/too many requests|rate limit/i, "操作太频繁，稍等一下再试"],
 ];
