@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, ImagePlus, X } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { MAX_EXPENSE_PHOTOS, normalizeExpensePhotos, safePhotoUrl } from "@/lib/split/photo";
 import type { ExpensePhoto } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
@@ -22,8 +16,9 @@ export function ExpensePhotoStrip({
   const [index, setIndex] = useState<number | null>(null);
   if (safe.length === 0) return null;
   return (
-    <>
-      <ul className={cn("flex flex-wrap gap-1.5", className)}>
+    <div className={cn("space-y-2", className)}>
+      <p className="text-xs text-muted">照片证明 · {safe.length} 张</p>
+      <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
         {safe.map((photo, i) => {
           const src = safePhotoUrl(photo.url);
           if (!src) return null;
@@ -32,10 +27,10 @@ export function ExpensePhotoStrip({
               <button
                 type="button"
                 onClick={() => setIndex(i)}
-                className="block overflow-hidden rounded-md outline outline-1 -outline-offset-1 outline-fg/10 transition-opacity hover:opacity-90"
+                className="block w-full overflow-hidden rounded-lg bg-bg-elevated outline outline-1 -outline-offset-1 outline-fg/10 transition-opacity hover:opacity-90"
                 aria-label={`查看第 ${i + 1} 张照片证明`}
               >
-                <img src={src} alt="" className="size-12 object-cover sm:size-14" />
+                <img src={src} alt="" className="aspect-square w-full object-cover" />
               </button>
             </li>
           );
@@ -47,7 +42,7 @@ export function ExpensePhotoStrip({
         onClose={() => setIndex(null)}
         onIndex={setIndex}
       />
-    </>
+    </div>
   );
 }
 
@@ -160,6 +155,7 @@ function ExpensePhotoViewer({
   const photo = open ? photos[index] : null;
   const src = photo ? safePhotoUrl(photo.url) : null;
   const count = photos.length;
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   function step(delta: number) {
     if (index == null || count <= 1) return;
@@ -168,53 +164,81 @@ function ExpensePhotoViewer({
 
   useEffect(() => {
     if (!open) return;
+    closeRef.current?.focus();
     function onKey(event: KeyboardEvent) {
-      if (event.key === "ArrowLeft") step(-1);
-      if (event.key === "ArrowRight") step(1);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onClose();
+        return;
+      }
+      if (index == null || count <= 1) return;
+      if (event.key === "ArrowLeft") onIndex((index - 1 + count) % count);
+      if (event.key === "ArrowRight") onIndex((index + 1) % count);
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, index, count]);
+    // Capture so the parent bill dialog does not swallow Escape / arrows.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, index, count, onClose, onIndex]);
 
-  return (
-    <Dialog open={Boolean(open && src)} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>照片证明</DialogTitle>
-          <DialogDescription>
-            {open ? `第 ${index + 1} / ${count} 张` : "查看账单附带的照片"}
-          </DialogDescription>
-        </DialogHeader>
-        {src ? (
-          <div className="relative">
-            <img
-              src={src}
-              alt=""
-              className="max-h-[70dvh] w-full rounded-lg bg-bg-elevated object-contain"
-            />
-            {count > 1 ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => step(-1)}
-                  className="absolute top-1/2 left-2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-fg/70 text-bg"
-                  aria-label="上一张"
-                >
-                  <ChevronLeft className="size-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => step(1)}
-                  className="absolute top-1/2 right-2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-fg/70 text-bg"
-                  aria-label="下一张"
-                >
-                  <ChevronRight className="size-5" />
-                </button>
-              </>
-            ) : null}
-          </div>
+  if (!open || !src || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex flex-col bg-fg/80 pointer-events-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-label="照片证明"
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-2 text-bg">
+        <p className="text-sm">
+          照片证明
+          <span className="ml-2 text-bg/70">
+            第 {index + 1} / {count} 张
+          </span>
+        </p>
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          className="grid size-10 place-items-center rounded-md text-bg/80 transition-colors hover:bg-bg/15 hover:text-bg"
+          aria-label="关闭"
+        >
+          <X className="size-5" />
+        </button>
+      </div>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-8">
+        <img
+          src={src}
+          alt=""
+          className="max-h-[80dvh] max-w-full rounded-lg bg-bg-elevated object-contain"
+        />
+        {count > 1 ? (
+          <>
+            <button
+              type="button"
+              onClick={() => step(-1)}
+              className="absolute top-1/2 left-3 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-bg/85 text-fg"
+              aria-label="上一张"
+            >
+              <ChevronLeft className="size-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => step(1)}
+              className="absolute top-1/2 right-3 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-bg/85 text-fg"
+              aria-label="下一张"
+            >
+              <ChevronRight className="size-5" />
+            </button>
+          </>
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>,
+    document.body,
   );
 }
