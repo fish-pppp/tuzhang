@@ -55,7 +55,9 @@ export async function sendPasswordResetOtp(input: {
   if (mailer.kind === "none" || mailer.kind === "invalid") {
     const message =
       mailer.kind === "invalid"
-        ? "邮件服务还没配好：已经有发信配置，但缺少 EMAIL_FROM"
+        ? mailer.reason === "EMAIL_FROM is malformed"
+          ? "邮件服务还没配好：EMAIL_FROM 请写成 途账 <noreply@diyforvisa.com>"
+          : "邮件服务还没配好：已经有发信配置，但缺少 EMAIL_FROM"
         : "邮件服务还没配好：Vercel 里要有 EMAIL_FROM 和 RESEND_API_KEY，保存后 Redeploy";
     console.error("[auth] password-reset mail is not configured", mailer);
     noteSend({ error: message });
@@ -99,23 +101,32 @@ async function sendResend(input: {
   text: string;
   html: string;
 }): Promise<void> {
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${input.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: input.from,
-      to: [input.to],
-      subject: input.subject,
-      text: input.text,
-      html: input.html,
-    }),
-  });
-  if (response.ok) return;
-  const detail = await response.text().catch(() => "");
-  throw new Error(`Resend ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+  const mailbox = extractEmailAddress(input.from);
+  const froms = input.from === mailbox ? [input.from] : [input.from, mailbox];
+  let lastError = "";
+
+  for (const from of froms) {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${input.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [input.to],
+        subject: input.subject,
+        text: input.text,
+        html: input.html,
+      }),
+    });
+    if (response.ok) return;
+    const detail = await response.text().catch(() => "");
+    lastError = `Resend ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`;
+    if (!/invalid[`\s]*from/i.test(detail) || from === mailbox) break;
+  }
+
+  throw new Error(lastError);
 }
 
 type SmtpConfig = {

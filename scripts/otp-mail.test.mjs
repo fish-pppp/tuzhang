@@ -8,6 +8,7 @@ import {
   extractEmailAddress,
   formatMailerError,
   maskEmail,
+  normalizeEmailFrom,
   passwordResetEmail,
   resolveMailer,
 } from "../src/lib/auth/otp-mail.mjs";
@@ -64,6 +65,32 @@ test("envTrim strips wrapping quotes on EMAIL_FROM", () => {
   });
   assert.equal(mailer.kind, "resend");
   assert.equal(mailer.from, "途账 <noreply@diyforvisa.com>");
+});
+
+test("normalizeEmailFrom restores a display name that lost its angle brackets", () => {
+  assert.equal(
+    normalizeEmailFrom("途账", { BETTER_AUTH_URL: "https://www.diyforvisa.com" }),
+    "途账 <noreply@diyforvisa.com>",
+  );
+  assert.equal(
+    normalizeEmailFrom("途账 noreply@diyforvisa.com"),
+    "途账 <noreply@diyforvisa.com>",
+  );
+  assert.equal(
+    normalizeEmailFrom("途账 &lt;noreply@diyforvisa.com&gt;"),
+    "途账 <noreply@diyforvisa.com>",
+  );
+  assert.equal(
+    normalizeEmailFrom("途账 ＜noreply@diyforvisa.com＞"),
+    "途账 <noreply@diyforvisa.com>",
+  );
+});
+
+test("resolveMailer rejects a display name with no mailbox", () => {
+  assert.deepEqual(resolveMailer({ RESEND_API_KEY: "re_test", EMAIL_FROM: "途账" }), {
+    kind: "invalid",
+    reason: "EMAIL_FROM is malformed",
+  });
 });
 
 test("formatMailerError explains a Resend unverified domain", () => {

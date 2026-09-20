@@ -21,6 +21,11 @@ export function envTrim(
   env: Record<string, string | undefined>,
   key: string,
 ): string | undefined;
+export function normalizeEmailFrom(
+  from: string | undefined,
+  env?: Record<string, string | undefined>,
+): string | undefined;
+export function isUsableFromAddress(from: string): boolean;
 export function allowOtpLog(env: Record<string, string | undefined>): boolean;
 export function resolveMailer(env: Record<string, string | undefined>): Mailer;
 export function extractEmailAddress(from: string): string;

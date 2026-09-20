@@ -90,7 +90,7 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 | `BETTER_AUTH_URL` | 自定义域名时建议 | 用户实际打开的 origin，不要末尾斜杠。绑了 `www.example.com` 就填 `https://www.example.com`，不要只填 `https://xxx.vercel.app`。 |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | 多个域名时建议 | 额外信任的登录来源，逗号分隔，例如 `https://www.example.com,https://xxx.vercel.app`。 |
 | `VITE_AUTH_ENABLED` | 可选 | 默认开启登录。只有本地调试才设成 `false`。 |
-| `EMAIL_FROM` | 发验证码时必需 | 发件人，如 `途账 <noreply@yourdomain.com>`。 |
+| `EMAIL_FROM` | 发验证码时必需 | 发件人，必须写成 `途账 <noreply@diyforvisa.com>`。尖括号不能省，也不要加引号。 |
 | `RESEND_API_KEY` | 发信二选一 | [Resend](https://resend.com) API Key。Vercel 上推荐这条（走 HTTPS）。 |
 | `SMTP_HOST` | 发信二选一 | SMTP 主机，如 `smtp.qq.com`。和 Resend 同时配时走 Resend。 |
 | `SMTP_PORT` | 可选 | 默认 `587`。QQ / 163 常用 `465`。 |
