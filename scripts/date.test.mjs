@@ -67,6 +67,17 @@ function shareForMember(expense, memberId) {
   return base + (index < rem ? 1 : 0);
 }
 
+function expenseCardPeopleIds(expense) {
+  const seen = new Set();
+  const ids = [];
+  for (const id of [expense.payerId, ...expense.participantIds]) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
 function expenseCardLine(expense, meId, payerName) {
   if (meId && expenseInvolves(expense, meId)) {
     return `我要付 ${formatMoney(shareForMember(expense, meId))}`;
@@ -120,4 +131,17 @@ test("expenseCardLine shows my share when involved, otherwise who paid", () => {
   assert.equal(expenseCardLine(e1, "yeah", "硬件"), `我要付 ${formatMoney(7000)}`);
   assert.equal(expenseCardLine(e3, "yingjian", "欣欣"), "欣欣付");
   assert.equal(expenseCardLine(e3, null, "欣欣"), "欣欣付");
+});
+
+test("expenseCardPeopleIds puts the payer first and drops duplicates", () => {
+  assert.deepEqual(expenseCardPeopleIds(e1), ["yingjian", "yeah"]);
+  assert.deepEqual(expenseCardPeopleIds(e2), ["yeah", "yingjian"]);
+  assert.deepEqual(
+    expenseCardPeopleIds({
+      ...e3,
+      payerId: "xinxin",
+      participantIds: ["yeah", "xinxin", "yeah"],
+    }),
+    ["xinxin", "yeah"],
+  );
 });
