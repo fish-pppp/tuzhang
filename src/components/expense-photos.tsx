@@ -18,7 +18,12 @@ export function ExpensePhotoStrip({
   return (
     <div className={cn("space-y-2", className)}>
       <p className="text-xs text-muted">照片证明 · {safe.length} 张</p>
-      <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+      <ul
+        className={cn(
+          "grid gap-2",
+          safe.length === 1 ? "grid-cols-1" : "grid-cols-3 sm:grid-cols-4",
+        )}
+      >
         {safe.map((photo, i) => {
           const src = safePhotoUrl(photo.url);
           if (!src) return null;
@@ -30,7 +35,15 @@ export function ExpensePhotoStrip({
                 className="block w-full overflow-hidden rounded-lg bg-bg-elevated outline outline-1 -outline-offset-1 outline-fg/10 transition-opacity hover:opacity-90"
                 aria-label={`查看第 ${i + 1} 张照片证明`}
               >
-                <img src={src} alt="" className="aspect-square w-full object-cover" />
+                <img
+                  src={src}
+                  alt=""
+                  className={
+                    safe.length === 1
+                      ? "max-h-56 w-full object-contain"
+                      : "aspect-square w-full object-cover"
+                  }
+                />
               </button>
             </li>
           );
