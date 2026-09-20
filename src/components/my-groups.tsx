@@ -114,7 +114,7 @@ export function MyGroupsPanel() {
       )}
 
       {groups.length > 0 ? (
-        <p className="mt-3 text-xs text-subtle">点进群组后，切到「与我相关」看你垫的和要摊的。</p>
+        <p className="mt-3 text-xs text-subtle">点进群组后，切到「我的A款」看你A了哪些钱、还要A多少。</p>
       ) : null}
 
       <CreateGroupDialog open={createOpen} onOpenChange={setCreateOpen} />

@@ -155,7 +155,7 @@ export function TripView({
           全员
         </TabButton>
         <TabButton active={tab === "mine"} onClick={() => setTab("mine")}>
-          与我相关
+          我的A款
         </TabButton>
       </div>
 
@@ -163,7 +163,7 @@ export function TripView({
         <section className="rounded-2xl bg-surface p-5 shadow-card">
           <h2 className="font-display text-lg font-semibold">你是谁？</h2>
           <p className="mt-1 text-sm text-muted">
-            先点一个头像，标记成你自己，就能看到你垫了什么、还要摊什么。
+            先点一个头像，标记成你自己，就能看你A了哪些钱、还要A多少。
           </p>
           <ul className="mt-4 flex flex-wrap gap-3">
             {trip.members.map((member) => (
