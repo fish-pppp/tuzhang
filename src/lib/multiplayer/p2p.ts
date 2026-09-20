@@ -45,7 +45,7 @@ export interface P2PRoomOptions {
   room: string;
   selfId: string;
   name?: string;
-  /** Defaults to VITE_STUN_URLS (comma-separated) or Google public STUN. */
+  /** Defaults to VITE_STUN_URLS (comma-separated) or public STUN (incl. CN). */
   iceServers?: RTCIceServer[];
   onPeersChanged?: (peers: PeerInfo[]) => void;
   /** Fires for both the unreliable "state" and reliable "reliable" channels. */
@@ -86,11 +86,13 @@ export function defaultIceServers(): RTCIceServer[] {
     ?.split(",")
     .map((u) => u.trim())
     .filter(Boolean);
-  // Two independent providers: ICE queries all of them in parallel during
-  // gathering, so either one being unreachable costs nothing.
+  // Prefer STUN hosts that still answer from mainland China. Google's public
+  // STUN is commonly unreachable there and used to be the only default.
   return [
     {
-      urls: urls?.length ? urls : ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"],
+      urls: urls?.length
+        ? urls
+        : ["stun:stun.qq.com:3478", "stun:stun.miwifi.com:3478", "stun:stun.cloudflare.com:3478"],
     },
   ];
 }

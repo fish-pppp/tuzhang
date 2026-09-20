@@ -16,9 +16,9 @@ import pg from "pg";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
-  if (process.env.VERCEL) {
+  if (process.env.VERCEL || process.env.TUZHANG_SELF_HOST === "1") {
     console.error(
-      "[migrate] DATABASE_URL is required on Vercel. Add a Postgres URL (Neon recommended) in Project Settings → Environment Variables, then redeploy.",
+      "[migrate] DATABASE_URL is required on Vercel / self-host. Add a Postgres URL and restart.",
     );
     process.exit(1);
   }

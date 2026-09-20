@@ -1,0 +1,17 @@
+# 把 {$TUZHANG_DOMAIN} 换成你的域名，和 BETTER_AUTH_URL 同一套。
+# 在已解析到这台机器的 VPS 上：
+#
+#   docker run --rm -d --name tuzhang-caddy \
+#     --network host \
+#     -e TUZHANG_DOMAIN=tuzhang.example.com \
+#     -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+#     -v caddy_data:/data \
+#     caddy:2-alpine
+#
+# 或把下面的反向代理写进本机已有的 nginx / Caddy。
+# 会话 Cookie 带 Secure + __Host-，必须走 https，不要用纯 http 公网 IP。
+
+{$TUZHANG_DOMAIN} {
+	encode gzip
+	reverse_proxy 127.0.0.1:3000
+}

@@ -44,9 +44,9 @@ import {
   PREVIEW_CLIENT_ID,
   PREVIEW_CLIENT_SECRET,
 } from "./preview";
+import { extraTrustedOrigins, requireAuthSecret } from "./origins";
 import {
   VERCEL_ALLOWED_HOSTS,
-  isVercelRuntime,
   vercelFallbackOrigin,
   vercelOrigins,
 } from "./vercel";
@@ -122,8 +122,9 @@ const baseURL = explicitBaseURL ?? {
 
 // Origins Better Auth accepts on credentialed POSTs (sign-up/sign-in, etc.).
 // Missing entries here surface as FORBIDDEN "Invalid origin".
+const extraOrigins = extraTrustedOrigins();
 const trustedOrigins: string[] = explicitBaseURL
-  ? [explicitBaseURL, ...LOCAL_DEV_ORIGINS, ...vercelOrigins()]
+  ? [explicitBaseURL, ...LOCAL_DEV_ORIGINS, ...vercelOrigins(), ...extraOrigins]
   : [
       // Host wildcards (matched against Origin's host)
       ...previewAllowedHosts,
@@ -131,13 +132,10 @@ const trustedOrigins: string[] = explicitBaseURL
       ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
       ...LOCAL_DEV_ORIGINS,
       ...vercelOrigins(),
+      ...extraOrigins,
     ];
 
-if (isVercelRuntime() && !env("BETTER_AUTH_SECRET")) {
-  throw new Error(
-    "[auth] BETTER_AUTH_SECRET is required on Vercel. Generate one with: openssl rand -base64 32",
-  );
-}
+requireAuthSecret();
 
 const databaseUrl = env("DATABASE_URL");
 

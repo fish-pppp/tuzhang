@@ -7,6 +7,7 @@ import {
   signIn,
 } from "@/lib/auth/client";
 import { emailAndPasswordEnabled } from "@/lib/auth/email-password";
+import { federatedSignInVisible } from "@/lib/auth/oauth-ui";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { friendlyAuthError } from "@/lib/errors";
 import { resolvePostLoginPath } from "@/lib/split/home-path";
@@ -96,98 +97,112 @@ function Login() {
         <p className="mt-2 text-sm text-muted">
           每个人用自己的账号。登录后会打开你创建的分组；也可以再新建或加入别人的群。
         </p>
-        <div className="mt-6 space-y-2">
-          {authEnabled ? (
-            GROK_PROVIDERS.map((p) => (
-              <Button
-                key={p.providerId}
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={() => signIn(p.providerId, { callbackURL })}
-              >
-                使用 {p.label} 继续
-              </Button>
-            ))
-          ) : (
-            <p className="text-sm text-muted">登录已关闭。</p>
-          )}
-        </div>
 
-        {authEnabled && emailAndPasswordEnabled ? (
+        {!authEnabled ? (
+          <p className="mt-6 text-sm text-muted">登录已关闭。</p>
+        ) : (
           <>
-            <div className="my-5 flex items-center gap-3 text-xs text-subtle">
-              <span className="h-px flex-1 bg-border" />
-              或用邮箱
-              <span className="h-px flex-1 bg-border" />
-            </div>
-            <div className="mb-3 flex rounded-full bg-chip p-1">
-              <button
-                type="button"
-                onClick={() => setMode("signin")}
-                className={
-                  mode === "signin"
-                    ? "h-10 flex-1 rounded-full bg-surface text-sm font-medium shadow-card"
-                    : "h-10 flex-1 rounded-full text-sm text-muted"
-                }
-              >
-                登录
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("signup")}
-                className={
-                  mode === "signup"
-                    ? "h-10 flex-1 rounded-full bg-surface text-sm font-medium shadow-card"
-                    : "h-10 flex-1 rounded-full text-sm text-muted"
-                }
-              >
-                注册
-              </button>
-            </div>
-            <form onSubmit={(e) => void onEmail(e)} className="space-y-3">
-              {mode === "signup" ? (
-                <div className="space-y-1.5">
-                  <Label htmlFor="name">名字</Label>
-                  <Input
-                    id="name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="同行怎么叫你"
-                    maxLength={40}
-                    autoComplete="name"
-                  />
+            {emailAndPasswordEnabled ? (
+              <div className="mt-6">
+                <div className="mb-3 flex rounded-full bg-chip p-1">
+                  <button
+                    type="button"
+                    onClick={() => setMode("signin")}
+                    className={
+                      mode === "signin"
+                        ? "h-10 flex-1 rounded-full bg-surface text-sm font-medium shadow-card"
+                        : "h-10 flex-1 rounded-full text-sm text-muted"
+                    }
+                  >
+                    登录
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("signup")}
+                    className={
+                      mode === "signup"
+                        ? "h-10 flex-1 rounded-full bg-surface text-sm font-medium shadow-card"
+                        : "h-10 flex-1 rounded-full text-sm text-muted"
+                    }
+                  >
+                    注册
+                  </button>
                 </div>
-              ) : null}
-              <div className="space-y-1.5">
-                <Label htmlFor="email">邮箱</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@email.com"
-                  autoComplete="email"
-                />
+                <form onSubmit={(e) => void onEmail(e)} className="space-y-3">
+                  {mode === "signup" ? (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="name">名字</Label>
+                      <Input
+                        id="name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="同行怎么叫你"
+                        maxLength={40}
+                        autoComplete="name"
+                      />
+                    </div>
+                  ) : null}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email">邮箱</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@email.com"
+                      autoComplete="email"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="password">密码</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="至少 8 位"
+                      autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                    />
+                  </div>
+                  {error ? <p className="text-sm text-owe">{error}</p> : null}
+                  <Button type="submit" className="w-full" disabled={pending}>
+                    {pending ? "请稍候…" : mode === "signup" ? "注册并进入" : "登录"}
+                  </Button>
+                </form>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="password">密码</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="至少 8 位"
-                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                />
-              </div>
-              {error ? <p className="text-sm text-owe">{error}</p> : null}
-              <Button type="submit" className="w-full" disabled={pending}>
-                {pending ? "请稍候…" : mode === "signup" ? "注册并进入" : "登录"}
-              </Button>
-            </form>
+            ) : null}
+
+            {federatedSignInVisible ? (
+              <>
+                {emailAndPasswordEnabled ? (
+                  <div className="my-5 flex items-center gap-3 text-xs text-subtle">
+                    <span className="h-px flex-1 bg-border" />
+                    或用第三方账号
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                ) : (
+                  <div className="mt-6" />
+                )}
+                <div className="space-y-2">
+                  {GROK_PROVIDERS.map((p) => (
+                    <Button
+                      key={p.providerId}
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => signIn(p.providerId, { callbackURL })}
+                    >
+                      使用 {p.label} 继续
+                    </Button>
+                  ))}
+                </div>
+                <p className="mt-3 text-xs text-subtle">
+                  国内网络请用邮箱。Google / X 在中国大陆通常打不开。
+                </p>
+              </>
+            ) : null}
           </>
-        ) : null}
+        )}
 
         <Link
           to="/"

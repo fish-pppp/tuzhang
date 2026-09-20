@@ -67,6 +67,8 @@ npm run build       # vite build + db:migrate（无 DATABASE_URL 时跳过迁移
 
 本仓库用 TanStack Start + Nitro 的 `vercel` preset，可直接接到 Vercel。线上必须接真实 Postgres（不要用本地 PGLite），否则群组和登录状态无法跨请求保存。
 
+**中国大陆打不开 `*.vercel.app` 是预期现象**，改 Vercel 地区或绑自定义域名但仍然 CNAME 到 Vercel，都解决不了。国内访问请看下面的「国内访问」。
+
 ### 1. 准备 Postgres（推荐 Neon）
 
 1. 打开 [Neon](https://neon.tech) 或 Vercel Marketplace 的 **Neon** 集成，新建一个项目。
@@ -112,3 +114,64 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 - **构建报 `BETTER_AUTH_SECRET is required`**：同上，补上密钥后 Redeploy。
 - **登录提示 Invalid origin**：`BETTER_AUTH_URL` 必须和浏览器地址栏 origin 一致（含 `https://`，无末尾 `/`）。自定义域名也要写进去。
 - **数据隔天没了**：没配 `DATABASE_URL` 时本地预览走内存库；Vercel 上已禁止这种部署。
+- **国内打不开**：Vercel 在中国大陆没有节点。见下一节。
+
+## 国内访问
+
+Vercel 的 CDN 和 `*.vercel.app` 在中国大陆经常被墙或完全超时。这不是网站代码坏了，也不是你没开「亚洲区域」——**平台本身到不了大陆**。
+
+### 推荐：香港 / 新加坡 / 日本 VPS 自建
+
+不需要 ICP 备案。买一台香港、新加坡或日本的轻量（阿里云国际、腾讯云国际、搬瓦工、Vultr 都可以），域名 **A 记录指到这台机器**，不要 CNAME 到 `cname.vercel-dns.com`。
+
+服务器上需要 Docker。在仓库根目录：
+
+```bash
+cp .env.example .env
+openssl rand -base64 32          # 写入 BETTER_AUTH_SECRET
+# 编辑 .env：
+#   BETTER_AUTH_URL=https://你的域名     # 不要末尾斜杠，必须和浏览器地址栏一致
+#   POSTGRES_PASSWORD=换成强密码         # 可选；不填则用 tuzhang
+```
+
+```bash
+docker compose --env-file .env -f docker-compose.prod.yml up -d --build
+```
+
+不要把本地开发用的 `BETTER_AUTH_URL=http://localhost:8080` 直接拿去生产。VPS 上单独写一份 `.env`，只填线上域名和密钥。
+
+容器会：
+
+1. 起本机 Postgres（不必再连 Neon；大陆访问 Neon 也不稳）
+2. 启动时跑 `db:migrate`
+3. 在 `:3000` 提供站点，并提供 `/api/health`
+
+前面再挂 HTTPS。仓库里有一份 Caddy 示例 `deploy/Caddyfile`：把域名解析到 VPS 后，用 Caddy 反代 `127.0.0.1:3000`。登录 Cookie 带 `Secure` 和 `__Host-`，**公网必须是 https**，不要用 `http://IP:3000` 给同行用。
+
+同时开了 `www` 和裸域时，把另一个 origin 写进 `BETTER_AUTH_TRUSTED_ORIGINS`。
+
+国内用户请用 **邮箱注册**。Google / X 在大陆通常打不开；生产镜像默认不显示这两个按钮（`VITE_SHOW_OAUTH=false`）。
+
+### 备选：域名已备案，用国内 CDN
+
+如果域名已经 ICP 备案，可以用阿里云 CDN、腾讯云 CDN 或 EdgeOne 回源到：
+
+- 上面这台香港 / 新加坡机器，或
+- 仍放在 Vercel 上的源站
+
+未备案不能用国内 CDN 做大陆加速。只把自定义域名 CNAME 到 Vercel，流量还是走被墙的 IP。
+
+### 不要指望这些办法
+
+| 做法 | 为什么不够 |
+| --- | --- |
+| 继续用 `xxx.vercel.app` | 域名和 IP 都常被墙 |
+| 自定义域名但仍解析到 Vercel | 还是 Vercel 的 Anycast IP |
+| Cloudflare 免费橙云回源 Vercel | Cloudflare 在大陆也不稳 |
+| 只换 Neon 区域 | 浏览器根本连不上 Vercel，到不了数据库这一步 |
+
+### 自建常见问题
+
+- **登录报 Invalid origin**：`BETTER_AUTH_URL` 必须等于地址栏 origin（`https://`，无末尾 `/`）。
+- **登录后立刻掉线**：用了 http 或 IP。给站点套上 https 域名。
+- **构建 / 启动要 `BETTER_AUTH_SECRET`**：生产镜像会检查。和 Vercel 一样，用 `openssl rand -base64 32` 生成，写进 `.env`。

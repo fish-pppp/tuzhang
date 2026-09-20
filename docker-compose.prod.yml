@@ -1,0 +1,48 @@
+# 国内可访问的生产部署：香港 / 新加坡 / 日本 VPS，或已备案的国内云。
+# 用法见 README「国内访问」。
+#
+#   cp .env.example .env   # 填 BETTER_AUTH_SECRET / BETTER_AUTH_URL
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tuzhang-prod-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tuzhang
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tuzhang}
+      POSTGRES_DB: tuzhang
+    volumes:
+      - tuzhang_prod_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tuzhang -d tuzhang"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        VITE_SHOW_OAUTH: ${VITE_SHOW_OAUTH:-false}
+    image: tuzhang:prod
+    container_name: tuzhang-prod-app
+    restart: unless-stopped
+    ports:
+      - "${TUZHANG_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      TUZHANG_SELF_HOST: "1"
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: postgres://tuzhang:${POSTGRES_PASSWORD:-tuzhang}@db:5432/tuzhang
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?请在 .env 里设置 BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?请在 .env 里设置 BETTER_AUTH_URL（https://你的域名，无末尾斜杠）}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  tuzhang_prod_pgdata:
