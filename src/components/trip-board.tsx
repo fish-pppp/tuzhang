@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Copy, Download, Plus, RotateCcw, Users } from "lucide-react";
 import { AddExpenseDialog } from "@/components/add-expense-dialog";
+import { ExpensePhotoStrip } from "@/components/expense-photos";
 import { AuthSlot } from "@/components/auth-slot";
 import { DeleteExpenseDialog } from "@/components/delete-expense-dialog";
 import { GroupMembersDialog } from "@/components/group-members-dialog";
@@ -32,6 +33,7 @@ import {
   isOpenExpense,
   isSettledExpense,
   type Expense,
+  type ExpensePhoto,
   type Member,
   type Trip,
 } from "@/lib/split/types";
@@ -52,6 +54,8 @@ export type TripViewProps = {
       "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
     >,
   ) => void | Promise<void>;
+  onUploadExpensePhoto?: (base64: string) => Promise<ExpensePhoto>;
+  onDiscardExpensePhotos?: (ids: string[]) => void | Promise<void>;
   onRemoveExpense: (id: string, reason: string) => void | Promise<void>;
   onSettle: () => void | Promise<void>;
   onSetMe?: (id: string) => void;
@@ -69,6 +73,8 @@ export function TripView({
   formerMembers,
   onRename,
   onAddExpense,
+  onUploadExpensePhoto,
+  onDiscardExpensePhotos,
   onRemoveExpense,
   onSettle,
   onSetMe,
@@ -577,6 +583,7 @@ export function TripView({
                           },
                         )}
                       </ul>
+                      <ExpensePhotoStrip photos={expense.photos} className="mt-2" />
                     </div>
                     {settled ? (
                       <span className="mt-1 min-h-10 text-xs text-subtle">已锁</span>
@@ -627,6 +634,7 @@ export function TripView({
                         {deleter?.name ?? (expense.deletedBy ? "成员" : "有人")}
                         {" "}删于 {formatDeletedAt(expense.deletedAt)}
                       </p>
+                      <ExpensePhotoStrip photos={expense.photos} className="mt-2 opacity-80" />
                     </li>
                   );
                 })}
@@ -662,6 +670,8 @@ export function TripView({
         trip={trip}
         defaultPayerId={meId ?? selectedMemberId ?? trip.members[0]?.id}
         onAdd={onAddExpense}
+        onUploadPhoto={onUploadExpensePhoto}
+        onDiscardPhotos={onDiscardExpensePhotos}
       />
       <DeleteExpenseDialog
         expense={deleting && isOpenExpense(deleting) ? deleting : null}

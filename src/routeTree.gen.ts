@@ -15,6 +15,7 @@ import { Route as GGroupIdRouteImport } from './routes/g.$groupId'
 import { Route as JoinCodeRouteImport } from './routes/join.$code'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiAvatarUserIdRouteImport } from './routes/api/avatar.$userId'
+import { Route as ApiExpensePhotoPhotoIdRouteImport } from './routes/api/expense-photo.$photoId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,11 @@ const ApiAvatarUserIdRoute = ApiAvatarUserIdRouteImport.update({
   path: '/api/avatar/$userId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiExpensePhotoPhotoIdRoute = ApiExpensePhotoPhotoIdRouteImport.update({
+  id: '/api/expense-photo/$photoId',
+  path: '/api/expense-photo/$photoId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/avatar/$userId': typeof ApiAvatarUserIdRoute
+  '/api/expense-photo/$photoId': typeof ApiExpensePhotoPhotoIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/avatar/$userId': typeof ApiAvatarUserIdRoute
+  '/api/expense-photo/$photoId': typeof ApiExpensePhotoPhotoIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +79,7 @@ export interface FileRoutesById {
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/avatar/$userId': typeof ApiAvatarUserIdRoute
+  '/api/expense-photo/$photoId': typeof ApiExpensePhotoPhotoIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +90,7 @@ export interface FileRouteTypes {
     | '/join/$code'
     | '/api/auth/$'
     | '/api/avatar/$userId'
+    | '/api/expense-photo/$photoId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +99,7 @@ export interface FileRouteTypes {
     | '/join/$code'
     | '/api/auth/$'
     | '/api/avatar/$userId'
+    | '/api/expense-photo/$photoId'
   id:
     | '__root__'
     | '/'
@@ -97,6 +108,7 @@ export interface FileRouteTypes {
     | '/join/$code'
     | '/api/auth/$'
     | '/api/avatar/$userId'
+    | '/api/expense-photo/$photoId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +118,7 @@ export interface RootRouteChildren {
   JoinCodeRoute: typeof JoinCodeRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiAvatarUserIdRoute: typeof ApiAvatarUserIdRoute
+  ApiExpensePhotoPhotoIdRoute: typeof ApiExpensePhotoPhotoIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -152,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAvatarUserIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/expense-photo/$photoId': {
+      id: '/api/expense-photo/$photoId'
+      path: '/api/expense-photo/$photoId'
+      fullPath: '/api/expense-photo/$photoId'
+      preLoaderRoute: typeof ApiExpensePhotoPhotoIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -162,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   JoinCodeRoute: JoinCodeRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiAvatarUserIdRoute: ApiAvatarUserIdRoute,
+  ApiExpensePhotoPhotoIdRoute: ApiExpensePhotoPhotoIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

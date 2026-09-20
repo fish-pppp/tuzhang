@@ -4,6 +4,7 @@ import { cloneDemoTrip } from "./demo";
 import { newId } from "./money";
 import { normalizeDeleteReason } from "./delete-reason";
 import { applySettlement, assertExpenseEditable, buildSettlement } from "./settlement";
+import { normalizeExpensePhotos } from "./photo";
 import { normalizeExpenseShares } from "./shares";
 import { isSettledExpense, type Expense, type Member, type Trip } from "./types";
 
@@ -54,6 +55,7 @@ export const useTripStore = create<TripState>()(
             amountCents: input.amountCents,
             shares: input.shares,
           });
+          const photos = normalizeExpensePhotos(input.photos);
           return {
             trip: {
               ...s.trip,
@@ -64,6 +66,7 @@ export const useTripStore = create<TripState>()(
                   payerId: input.payerId,
                   participantIds: [...new Set(input.participantIds)],
                   ...(shares ? { shares } : {}),
+                  ...(photos ? { photos } : {}),
                   id: newId(),
                   createdAt: new Date().toISOString(),
                 },
