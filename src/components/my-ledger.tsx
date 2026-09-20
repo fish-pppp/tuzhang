@@ -3,6 +3,7 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
 import { Badge } from "@/components/ui/badge";
 import {
+  expenseSplitLabel,
   groupChipByPayer,
   groupOthersOweByPerson,
   personalBook,
@@ -207,7 +208,7 @@ function PaidSection({
             >
               <ExpenseHead expense={expense} />
               <p className="mt-1 text-xs text-muted">
-                {expense.participantIds.length} 人 AA
+                {expenseSplitLabel(expense)}
               </p>
               <div className="mt-3 flex items-baseline justify-between gap-3">
                 <span className="text-sm text-muted">我A了</span>
@@ -322,8 +323,10 @@ function ChipSection({
                   <ExpenseHead expense={expense} hideAmount />
                   <p className="mt-1 text-xs text-muted">
                     {payer?.name ?? "未知"} 先付 {formatMoney(expense.amountCents)}
-                    {n > 0 ? ` · ${n} 人 AA` : ""}
-                    {n > 0 ? ` · 人均 ${formatMoney(Math.round(expense.amountCents / n))}` : ""}
+                    {n > 0 ? ` · ${expenseSplitLabel(expense)}` : ""}
+                    {n > 0 && !expense.shares?.length
+                      ? ` · 人均 ${formatMoney(Math.round(expense.amountCents / n))}`
+                      : ""}
                   </p>
                   <div className="mt-3 flex items-baseline justify-between gap-3">
                     <span className="text-sm text-muted">我要A</span>

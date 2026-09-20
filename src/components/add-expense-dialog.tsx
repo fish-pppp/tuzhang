@@ -11,9 +11,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MemberAvatar } from "@/components/member-avatar";
-import { parseYuan } from "@/lib/split/money";
-import type { Expense, Trip } from "@/lib/split/types";
+import { formatMoney, parseYuan } from "@/lib/split/money";
+import { equalShares, normalizeExpenseShares } from "@/lib/split/shares";
+import type { Expense, ExpenseShare, Trip } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
+
+type SplitMode = "equal" | "custom";
 
 export function AddExpenseDialog({
   open,
@@ -26,7 +29,12 @@ export function AddExpenseDialog({
   onOpenChange: (open: boolean) => void;
   trip: Trip;
   defaultPayerId?: string | null;
-  onAdd: (input: Omit<Expense, "id" | "createdAt">) => void | Promise<void>;
+  onAdd: (
+    input: Omit<
+      Expense,
+      "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
+    >,
+  ) => void | Promise<void>;
 }) {
   const fallbackPayer = defaultPayerId ?? trip.members[0]?.id ?? "";
   const [title, setTitle] = useState("");
@@ -35,42 +43,79 @@ export function AddExpenseDialog({
   const [participantIds, setParticipantIds] = useState<string[]>(
     trip.members.map((m) => m.id),
   );
+  const [splitMode, setSplitMode] = useState<SplitMode>("equal");
+  const [customYuan, setCustomYuan] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  function fillEqualCustom(ids: string[], yuan: string) {
+    const cents = parseYuan(yuan);
+    if (!cents || ids.length === 0) {
+      setCustomYuan(Object.fromEntries(ids.map((id) => [id, ""])));
+      return;
+    }
+    const next: Record<string, string> = {};
+    for (const share of equalShares(ids, cents)) {
+      next[share.memberId] = (share.cents / 100).toFixed(2);
+    }
+    setCustomYuan(next);
+  }
+
   useEffect(() => {
     if (!open) return;
+    const ids = trip.members.map((m) => m.id);
     setPayerId(defaultPayerId ?? trip.members[0]?.id ?? "");
-    setParticipantIds(trip.members.map((m) => m.id));
+    setParticipantIds(ids);
     setTitle("");
     setAmount("");
+    setSplitMode("equal");
+    setCustomYuan({});
     setError(null);
     setPending(false);
   }, [open, defaultPayerId, trip.members]);
 
   const allSelected = participantIds.length === trip.members.length;
+  const amountCents = parseYuan(amount);
   const perHead = useMemo(() => {
-    const cents = parseYuan(amount);
-    if (!cents || participantIds.length === 0) return null;
-    return cents / participantIds.length;
-  }, [amount, participantIds.length]);
+    if (!amountCents || participantIds.length === 0) return null;
+    return amountCents / participantIds.length;
+  }, [amountCents, participantIds.length]);
+
+  const customShares = useMemo(() => {
+    if (splitMode !== "custom") return null;
+    const shares: ExpenseShare[] = [];
+    for (const id of participantIds) {
+      const cents = parseYuan(customYuan[id] ?? "", { allowZero: true });
+      if (cents == null) return null;
+      shares.push({ memberId: id, cents });
+    }
+    return shares;
+  }, [customYuan, participantIds, splitMode]);
+
+  const customTotal = customShares?.reduce((sum, s) => sum + s.cents, 0) ?? null;
+  const customDiff =
+    amountCents != null && customTotal != null ? customTotal - amountCents : null;
 
   function resetForm() {
     setTitle("");
     setAmount("");
     setPayerId(defaultPayerId ?? trip.members[0]?.id ?? "");
     setParticipantIds(trip.members.map((m) => m.id));
+    setSplitMode("equal");
+    setCustomYuan({});
     setError(null);
     setPending(false);
   }
 
   function toggleParticipant(id: string) {
     setParticipantIds((prev) => {
-      if (prev.includes(id)) {
-        if (prev.length === 1) return prev;
-        return prev.filter((x) => x !== id);
-      }
-      return [...prev, id];
+      const next = prev.includes(id)
+        ? prev.length === 1
+          ? prev
+          : prev.filter((x) => x !== id)
+        : [...prev, id];
+      if (splitMode === "custom") fillEqualCustom(next, amount);
+      return next;
     });
   }
 
@@ -86,7 +131,18 @@ export function AddExpenseDialog({
       return;
     }
     if (participantIds.length === 0) {
-      setError("至少选择一位一起 AA 的人");
+      setError("至少选择一位一起分摊的人");
+      return;
+    }
+    let shares: ExpenseShare[] | undefined;
+    try {
+      shares = normalizeExpenseShares({
+        participantIds,
+        amountCents: cents,
+        shares: splitMode === "custom" ? customShares ?? undefined : undefined,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "分摊金额不对");
       return;
     }
     setPending(true);
@@ -96,6 +152,7 @@ export function AddExpenseDialog({
         amountCents: cents,
         payerId,
         participantIds,
+        ...(shares ? { shares } : {}),
       });
       resetForm();
       onOpenChange(false);
@@ -117,7 +174,9 @@ export function AddExpenseDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>记一笔</DialogTitle>
-          <DialogDescription>谁先垫了钱，再选一起 AA 的人。</DialogDescription>
+          <DialogDescription>
+            谁先垫了钱。可以平均 AA，也可以按人填不同的价。
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void onSubmit(e)} className="flex min-h-0 flex-col gap-5 overflow-y-auto">
           <div className="space-y-2">
@@ -132,14 +191,16 @@ export function AddExpenseDialog({
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => {
-                  setAmount(e.target.value);
+                  const next = e.target.value;
+                  setAmount(next);
                   setError(null);
+                  if (splitMode === "custom") fillEqualCustom(participantIds, next);
                 }}
                 className="h-14 pl-8 font-display text-2xl tabular-nums"
                 autoFocus
               />
             </div>
-            {perHead != null && (
+            {splitMode === "equal" && perHead != null && (
               <p className="text-xs text-muted tabular-nums">
                 {participantIds.length} 人平摊，约 ¥
                 {(perHead / 100).toFixed(2)} / 人
@@ -183,15 +244,17 @@ export function AddExpenseDialog({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>谁一起 AA</Label>
+              <Label>谁一起摊</Label>
               <button
                 type="button"
                 className="text-xs font-medium text-primary"
-                onClick={() =>
-                  setParticipantIds(
-                    allSelected ? [payerId].filter(Boolean) : trip.members.map((m) => m.id),
-                  )
-                }
+                onClick={() => {
+                  const next = allSelected
+                    ? [payerId].filter(Boolean)
+                    : trip.members.map((m) => m.id);
+                  setParticipantIds(next);
+                  if (splitMode === "custom") fillEqualCustom(next, amount);
+                }}
               >
                 {allSelected ? "只留付款人" : "全选"}
               </button>
@@ -222,6 +285,76 @@ export function AddExpenseDialog({
             </div>
           </div>
 
+          <div className="space-y-2">
+            <Label>怎么分</Label>
+            <div className="flex rounded-full bg-chip p-0.5">
+              <ModeButton
+                active={splitMode === "equal"}
+                onClick={() => {
+                  setSplitMode("equal");
+                  setError(null);
+                }}
+              >
+                平均 AA
+              </ModeButton>
+              <ModeButton
+                active={splitMode === "custom"}
+                onClick={() => {
+                  setSplitMode("custom");
+                  fillEqualCustom(participantIds, amount);
+                  setError(null);
+                }}
+              >
+                自定义价格
+              </ModeButton>
+            </div>
+            {splitMode === "custom" ? (
+              <ul className="space-y-2">
+                {participantIds.map((id) => {
+                  const member = trip.members.find((m) => m.id === id);
+                  if (!member) return null;
+                  return (
+                    <li key={id} className="flex items-center gap-2">
+                      <MemberAvatar member={member} size="sm" />
+                      <span className="min-w-0 flex-1 truncate text-sm">{member.name}</span>
+                      <div className="relative w-28">
+                        <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-muted">
+                          ¥
+                        </span>
+                        <Input
+                          inputMode="decimal"
+                          value={customYuan[id] ?? ""}
+                          onChange={(e) => {
+                            setCustomYuan((prev) => ({ ...prev, [id]: e.target.value }));
+                            setError(null);
+                          }}
+                          className="h-10 pl-6 tabular-nums"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+                {customDiff != null ? (
+                  <p
+                    className={cn(
+                      "text-xs tabular-nums",
+                      customDiff === 0 ? "text-muted" : "text-owe",
+                    )}
+                  >
+                    {customDiff === 0
+                      ? `加起来 ${formatMoney(customTotal ?? 0)}，对得上`
+                      : customDiff > 0
+                        ? `比总额多了 ${formatMoney(customDiff)}`
+                        : `比总额少了 ${formatMoney(-customDiff)}`}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted">每个人填自己那一份，加起来要等于总价。</p>
+                )}
+              </ul>
+            ) : null}
+          </div>
+
           {error && <p className="text-sm text-owe">{error}</p>}
 
           <Button type="submit" className="h-12 w-full rounded-lg text-base" disabled={pending}>
@@ -230,5 +363,28 @@ export function AddExpenseDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ModeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "h-8 flex-1 rounded-full text-xs font-medium transition-colors",
+        active ? "bg-surface text-fg shadow-card" : "text-muted hover:text-fg",
+      )}
+    >
+      {children}
+    </button>
   );
 }

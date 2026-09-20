@@ -3,7 +3,14 @@ import { persist } from "zustand/middleware";
 import { cloneDemoTrip } from "./demo";
 import { newId } from "./money";
 import { normalizeDeleteReason } from "./delete-reason";
-import type { Expense, Member, Trip } from "./types";
+import { applySettlement, assertExpenseEditable, buildSettlement } from "./settlement";
+import { normalizeExpenseShares } from "./shares";
+import { isSettledExpense, type Expense, type Member, type Trip } from "./types";
+
+type ExpenseDraft = Omit<
+  Expense,
+  "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
+>;
 
 type TripState = {
   trip: Trip;
@@ -14,8 +21,9 @@ type TripState = {
   selectMember: (id: string | null) => void;
   setMeId: (id: string) => void;
   renameTrip: (name: string) => void;
-  addExpense: (input: Omit<Expense, "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason">) => void;
+  addExpense: (input: ExpenseDraft) => void;
   removeExpense: (id: string, reason: string) => void;
+  settleOpen: () => void;
   addMember: (name: string) => void;
   renameMember: (id: string, name: string) => void;
   removeMember: (id: string) => void;
@@ -40,21 +48,34 @@ export const useTripStore = create<TripState>()(
       renameTrip: (name) =>
         set((s) => ({ trip: { ...s.trip, name: name.trim() || s.trip.name } })),
       addExpense: (input) =>
-        set((s) => ({
-          trip: {
-            ...s.trip,
-            expenses: [
-              {
-                ...input,
-                id: newId(),
-                createdAt: new Date().toISOString(),
-              },
-              ...s.trip.expenses,
-            ],
-          },
-        })),
+        set((s) => {
+          const shares = normalizeExpenseShares({
+            participantIds: input.participantIds,
+            amountCents: input.amountCents,
+            shares: input.shares,
+          });
+          return {
+            trip: {
+              ...s.trip,
+              expenses: [
+                {
+                  title: input.title,
+                  amountCents: input.amountCents,
+                  payerId: input.payerId,
+                  participantIds: [...new Set(input.participantIds)],
+                  ...(shares ? { shares } : {}),
+                  id: newId(),
+                  createdAt: new Date().toISOString(),
+                },
+                ...s.trip.expenses,
+              ],
+            },
+          };
+        }),
       removeExpense: (id, reason) =>
         set((s) => {
+          const target = s.trip.expenses.find((e) => e.id === id);
+          if (target) assertExpenseEditable(target);
           const deleteReason = normalizeDeleteReason(reason);
           const deletedAt = new Date().toISOString();
           return {
@@ -72,6 +93,11 @@ export const useTripStore = create<TripState>()(
               ),
             },
           };
+        }),
+      settleOpen: () =>
+        set((s) => {
+          const { settlement } = buildSettlement(s.trip, s.meId);
+          return { trip: applySettlement(s.trip, settlement) };
         }),
       addMember: (name) =>
         set((s) => {
@@ -97,12 +123,18 @@ export const useTripStore = create<TripState>()(
               ...s.trip,
               members: s.trip.members.filter((m) => m.id !== id),
               expenses: s.trip.expenses
-                .map((e) => ({
-                  ...e,
-                  participantIds: e.participantIds.filter((pid) => pid !== id),
-                }))
+                .map((e) => {
+                  if (isSettledExpense(e)) return e;
+                  return {
+                    ...e,
+                    participantIds: e.participantIds.filter((pid) => pid !== id),
+                    shares: e.shares?.filter((share) => share.memberId !== id),
+                  };
+                })
                 .filter(
-                  (e) => e.payerId !== id && e.participantIds.length > 0,
+                  (e) =>
+                    isSettledExpense(e) ||
+                    (e.payerId !== id && e.participantIds.length > 0),
                 ),
             },
             selectedMemberId:
@@ -119,7 +151,7 @@ export const useTripStore = create<TripState>()(
             trip: {
               ...s.trip,
               expenses: s.trip.expenses.map((e) =>
-                e.deletedAt
+                e.deletedAt || isSettledExpense(e)
                   ? e
                   : {
                       ...e,
@@ -131,10 +163,14 @@ export const useTripStore = create<TripState>()(
             },
           };
         }),
-      replaceTrip: (trip) => set({ trip, selectedMemberId: null }),
+      replaceTrip: (trip) =>
+        set({
+          trip: { ...trip, settlements: trip.settlements ?? [] },
+          selectedMemberId: null,
+        }),
     }),
     {
-      name: "tuzhang-trip-v3",
+      name: "tuzhang-trip-v4",
       partialize: (s) => ({ trip: s.trip, meId: s.meId }),
       skipHydration: true,
     },
