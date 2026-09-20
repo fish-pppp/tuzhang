@@ -45,6 +45,12 @@ import {
   PREVIEW_CLIENT_SECRET,
 } from "./preview";
 import {
+  LOCAL_DEV_ORIGINS,
+  extraTrustedOrigins,
+  resolveTrustedOrigins,
+  staticTrustedOrigins,
+} from "./origins";
+import {
   VERCEL_ALLOWED_HOSTS,
   isVercelRuntime,
   vercelFallbackOrigin,
@@ -102,14 +108,6 @@ const previewAllowedHosts: string[] = [
   ...PREVIEW_ALLOWED_HOSTS,
   ...VERCEL_ALLOWED_HOSTS,
 ];
-// Local `npm run dev` (port 8080 contract). Browsers may send Origin as any of
-// these for the same server — trusting only `localhost` rejects `127.0.0.1` and
-// breaks email/password with "Invalid origin".
-const LOCAL_DEV_ORIGINS: string[] = [
-  "http://localhost:8080",
-  "http://127.0.0.1:8080",
-  "http://[::1]:8080",
-];
 const baseURL = explicitBaseURL ?? {
   // Include loopback hosts so dynamic baseURL resolves for local email/password
   // (not only the preview wildcard). `*.vercel.app` covers Production + Preview.
@@ -121,17 +119,19 @@ const baseURL = explicitBaseURL ?? {
 };
 
 // Origins Better Auth accepts on credentialed POSTs (sign-up/sign-in, etc.).
-// Missing entries here surface as FORBIDDEN "Invalid origin".
-const trustedOrigins: string[] = explicitBaseURL
-  ? [explicitBaseURL, ...LOCAL_DEV_ORIGINS, ...vercelOrigins()]
-  : [
-      // Host wildcards (matched against Origin's host)
-      ...previewAllowedHosts,
-      // Full-origin wildcards (matched against Origin)
-      ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
-      ...LOCAL_DEV_ORIGINS,
-      ...vercelOrigins(),
-    ];
+// Missing entries here surface as FORBIDDEN "Invalid origin". Always keep
+// preview / Vercel wildcards even when BETTER_AUTH_URL is set — otherwise a
+// custom domain (or live preview) is rejected. Same-origin POSTs are also
+// trusted so binding www.example.com does not require a redeploy of the env.
+const trustedOriginsStatic = staticTrustedOrigins({
+  explicitBaseURL,
+  extraOrigins: extraTrustedOrigins(),
+  vercelOrigins: vercelOrigins(),
+  previewHosts: previewAllowedHosts,
+  localOrigins: LOCAL_DEV_ORIGINS,
+});
+const trustedOrigins = (request?: Request) =>
+  resolveTrustedOrigins(request, trustedOriginsStatic);
 
 if (isVercelRuntime() && !env("BETTER_AUTH_SECRET")) {
   throw new Error(

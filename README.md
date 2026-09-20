@@ -49,7 +49,7 @@ npm run dev                   # http://localhost:8080
 | 现象 | 原因 / 解法 |
 | --- | --- |
 | 登录后刷新又变成未登录 | 请用 `http://localhost:8080` 访问。会话 Cookie 带 `Secure` 标志，浏览器只对 `localhost` 放行 http；用局域网 IP（如 `http://192.168.x.x:8080`）打开时 Cookie 会被丢弃。手机联调请用 https 反向代理或 `localhost` 端口转发。 |
-| 登录报「Invalid origin」 | 地址栏 origin 必须和 `.env` 里 `BETTER_AUTH_URL` 一致（含协议、端口，无末尾 `/`）。 |
+| 登录报来源校验失败 | 地址栏 origin 必须在白名单里（含协议、端口，无末尾 `/`）。自定义域名要写进 `BETTER_AUTH_URL` 或 `BETTER_AUTH_TRUSTED_ORIGINS`，不要只填 Vercel 域名。 |
 | `npm run db:migrate` 连不上 | 确认 `docker compose ps` 里 db 是 healthy；`DATABASE_URL` 的端口 / 密码和 compose 文件一致。 |
 | 重启后账号全没了 | 没配 `DATABASE_URL`，跑在内存 PGLite 上。按上面第 2、3 步接上 Postgres。 |
 | Google / X 按钮点了报错 | 没有 `GROK_AUTH_*` 密钥时属预期行为，用邮箱注册即可。 |
@@ -86,7 +86,8 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 | --- | --- | --- |
 | `DATABASE_URL` | 线上必需 | Neon / 任意 Postgres 连接串。构建时会跑 `npm run db:migrate`。 |
 | `BETTER_AUTH_SECRET` | 线上必需 | 登录会话签名密钥。每个 Serverless 实例不能各自随机，否则会掉登录。 |
-| `BETTER_AUTH_URL` | 自定义域名时建议 | 站点公网 origin，不要末尾斜杠，例如 `https://tuzhang.vercel.app`。不填则自动用 Vercel 部署域名。 |
+| `BETTER_AUTH_URL` | 自定义域名时建议 | 用户实际打开的 origin，不要末尾斜杠。绑了 `www.example.com` 就填 `https://www.example.com`，不要只填 `https://xxx.vercel.app`。 |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | 多个域名时建议 | 额外信任的登录来源，逗号分隔，例如 `https://www.example.com,https://xxx.vercel.app`。 |
 | `VITE_AUTH_ENABLED` | 可选 | 默认开启登录。只有本地调试才设成 `false`。 |
 | `GROK_AUTH_ISSUER` / `GROK_AUTH_CLIENT_ID` / `GROK_AUTH_CLIENT_SECRET` | 可选 | Grok 登录中转（Google / X）。自己部署时一般没有这些密钥，**请用邮箱注册**。 |
 
@@ -96,7 +97,7 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 2. Framework Preset 选 **TanStack Start**（仓库里的 `vercel.json` 已写明）。不要改 Output Directory。
 3. Build Command 保持 `npm run build`（会先打包再执行迁移）。
 4. 在 **Environment Variables** 里填上表中的变量，勾选 Production / Preview / Development。
-5. Deploy。第一次成功后，把 Production URL 填回 `BETTER_AUTH_URL`（或绑自定义域名后再填），然后 Redeploy 一次。
+5. Deploy。第一次成功后，把**用户实际打开的地址**填回 `BETTER_AUTH_URL`（绑自定义域名就填自定义域名，不要只填 `*.vercel.app`），需要并存多个域名时再加上 `BETTER_AUTH_TRUSTED_ORIGINS`，然后 Redeploy 一次。
 
 没有 Vercel 账号密钥时，无法从这边替你点 Deploy。你在 Dashboard 点一次即可；之后 push `main` 会自动发版。
 
@@ -110,5 +111,5 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 
 - **构建报 `DATABASE_URL is required on Vercel`**：变量没配，或只配了 Production、Preview 构建读不到。三个环境都勾上。
 - **构建报 `BETTER_AUTH_SECRET is required`**：同上，补上密钥后 Redeploy。
-- **登录提示 Invalid origin**：`BETTER_AUTH_URL` 必须和浏览器地址栏 origin 一致（含 `https://`，无末尾 `/`）。自定义域名也要写进去。
+- **登录提示来源校验失败**：浏览器地址栏 origin 必须在白名单里（含 `https://`，无末尾 `/`）。最常见原因是页面开在自定义域名（如 `https://www.example.com`），而 `BETTER_AUTH_URL` 仍是 `https://xxx.vercel.app`。把自定义域名写进 `BETTER_AUTH_URL` 或 `BETTER_AUTH_TRUSTED_ORIGINS` 后 Redeploy。
 - **数据隔天没了**：没配 `DATABASE_URL` 时本地预览走内存库；Vercel 上已禁止这种部署。
