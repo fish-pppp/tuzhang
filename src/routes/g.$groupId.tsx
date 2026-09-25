@@ -7,6 +7,7 @@ import { friendlyError, isUnauthorizedError } from "@/lib/errors";
 import {
   addGroupExpense,
   leaveGroup,
+  updateGroupExpense,
   loadGroup,
   removeGroupExpense,
   removeGroupMember,
@@ -122,9 +123,22 @@ function GroupPage() {
           await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
           await queryClient.invalidateQueries({ queryKey: ["groups"] });
         }}
-        onUploadExpensePhoto={(base64) =>
-          uploadExpensePhoto({ data: { groupId, base64 } })
-        }
+        onUpdateExpense={async (expenseId, input) => {
+          await updateGroupExpense({
+            data: {
+              groupId,
+              expenseId,
+              title: input.title,
+              amountCents: input.amountCents,
+              payerId: input.payerId,
+              participantIds: input.participantIds,
+              shares: input.shares,
+            },
+          });
+          await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
+          await queryClient.invalidateQueries({ queryKey: ["groups"] });
+        }}
+        onUploadExpensePhoto={(base64) => uploadExpensePhoto({ data: { groupId, base64 } })}
         onDiscardExpensePhotos={async (photoIds) => {
           await discardExpensePhotos({ data: { groupId, photoIds } });
         }}

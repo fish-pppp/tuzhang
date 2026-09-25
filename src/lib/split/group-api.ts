@@ -4,18 +4,16 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
 import { memberBalance } from "./calc";
 import { normalizeDeleteReason } from "./delete-reason";
+import { diffExpenseEdits, parseExpenseChanges } from "./expense-edit";
 import { homeGroupName } from "./home-group";
 import { assertCanRemoveMember } from "./member-rules";
 import { newId } from "./money";
 import { buildSettlement } from "./settlement";
-import {
-  expensePhotoPublicUrl,
-  isExpensePhotoId,
-  MAX_EXPENSE_PHOTOS,
-} from "./photo";
+import { expensePhotoPublicUrl, isExpensePhotoId, MAX_EXPENSE_PHOTOS } from "./photo";
 import { normalizeExpenseShares } from "./shares";
 import type {
   Expense,
+  ExpenseEdit,
   ExpensePhoto,
   ExpenseShare,
   Member,
@@ -64,11 +62,39 @@ function inviteCode(): string {
 
 /** Postgres `unique_violation` — the only error worth retrying with a new invite code. */
 function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    (err as { code?: unknown }).code === "23505"
-  );
+  return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "23505";
+}
+
+function readEditChanges(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return [];
+  }
+}
+
+async function replaceExpenseShares(
+  sql: Awaited<ReturnType<typeof getSql>>,
+  expenseId: string,
+  participantIds: string[],
+  shares: ExpenseShare[] | undefined,
+) {
+  await sql`delete from group_expense_shares where expense_id = ${expenseId}`;
+  if (shares && shares.length > 0) {
+    const shareIds = shares.map((share) => share.memberId);
+    const shareCents = shares.map((share) => share.cents);
+    await sql`
+      insert into group_expense_shares (expense_id, user_id, amount_cents)
+      select ${expenseId}, t.user_id, t.cents
+      from unnest(${shareIds}::text[], ${shareCents}::int[]) as t(user_id, cents)
+    `;
+    return;
+  }
+  await sql`
+    insert into group_expense_shares (expense_id, user_id)
+    select ${expenseId}, unnest(${participantIds}::text[])
+  `;
 }
 
 async function requireMember(
@@ -134,13 +160,14 @@ async function loadGroupTrip(
     title: string;
     amount_cents: number;
     payer_id: string;
+    created_by: string;
     created_at: string;
     deleted_at: string | null;
     deleted_by: string | null;
     delete_reason: string | null;
     settlement_id: string | null;
   }>`
-    select id, title, amount_cents, payer_id, created_at::text as created_at,
+    select id, title, amount_cents, payer_id, created_by, created_at::text as created_at,
            deleted_at::text as deleted_at, deleted_by, delete_reason,
            settlement_id
     from group_expenses
@@ -204,6 +231,7 @@ async function loadGroupTrip(
         : {}),
       ...(photos && photos.length > 0 ? { photos } : {}),
       createdAt: e.created_at,
+      createdBy: e.created_by,
       deletedAt: e.deleted_at,
       deletedBy: e.deleted_by,
       deleteReason: e.delete_reason,
@@ -249,6 +277,26 @@ async function loadGroupTrip(
     list.push(expense.id);
     expensesBySettlement.set(expense.settlementId, list);
   }
+  const editRows = await sql<{
+    id: string;
+    expense_id: string;
+    edited_by: string;
+    edited_at: string;
+    changes: unknown;
+  }>`
+    select id, expense_id, edited_by, edited_at::text as edited_at, changes
+    from group_expense_edits
+    where group_id = ${groupId}
+    order by edited_at desc
+  `;
+  const expenseEdits: ExpenseEdit[] = editRows.map((row) => ({
+    id: row.id,
+    expenseId: row.expense_id,
+    editedBy: row.edited_by,
+    editedAt: row.edited_at,
+    changes: parseExpenseChanges(readEditChanges(row.changes)),
+  }));
+
   const settlements: Settlement[] = settlementRows.map((row) => ({
     id: row.id,
     createdAt: row.created_at,
@@ -266,6 +314,7 @@ async function loadGroupTrip(
     formerMembers,
     expenses,
     settlements,
+    expenseEdits,
   };
 }
 
@@ -399,9 +448,7 @@ async function createOwnedGroup(
 
 export const createGroup = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: unknown) =>
-    z.object({ name: nameSchema }).merge(profileSchema).parse(data),
-  )
+  .validator((data: unknown) => z.object({ name: nameSchema }).merge(profileSchema).parse(data))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     return createOwnedGroup(
@@ -439,8 +486,7 @@ export const ensureMyHomeGroup = createServerFn({ method: "POST" })
     }>`
       select "name", "email", "image" from "user" where "id" = ${context.userId} limit 1
     `;
-    const displayName =
-      users[0]?.name?.trim() || users[0]?.email?.split("@")[0] || "途友";
+    const displayName = users[0]?.name?.trim() || users[0]?.email?.split("@")[0] || "途友";
     const created = await createOwnedGroup(
       sql,
       context.userId,
@@ -453,9 +499,7 @@ export const ensureMyHomeGroup = createServerFn({ method: "POST" })
 
 export const joinGroup = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: unknown) =>
-    z.object({ code: codeSchema }).merge(profileSchema).parse(data),
-  )
+  .validator((data: unknown) => z.object({ code: codeSchema }).merge(profileSchema).parse(data))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const groups = await sql<{ id: string; name: string }>`
@@ -494,9 +538,7 @@ export const loadGroup = createServerFn({ method: "GET" })
 
 export const renameGroup = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: unknown) =>
-    z.object({ groupId: groupIdSchema, name: nameSchema }).parse(data),
-  )
+  .validator((data: unknown) => z.object({ groupId: groupIdSchema, name: nameSchema }).parse(data))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await requireMember(sql, data.groupId, context.userId);
@@ -556,9 +598,7 @@ export const addGroupExpense = createServerFn({ method: "POST" })
     `;
     const allowed = new Set(members.map((m) => m.user_id));
     if (!allowed.has(data.payerId)) throw new Error("付款人不在群组里");
-    const participants = [...new Set(data.participantIds)].filter((id) =>
-      allowed.has(id),
-    );
+    const participants = [...new Set(data.participantIds)].filter((id) => allowed.has(id));
     if (participants.length === 0) throw new Error("至少选择一位一起分摊的人");
     const shares = normalizeExpenseShares({
       participantIds: participants,
@@ -613,6 +653,145 @@ export const addGroupExpense = createServerFn({ method: "POST" })
       throw err;
     }
     return { id };
+  });
+
+export const updateGroupExpense = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: unknown) =>
+    z
+      .object({
+        groupId: groupIdSchema,
+        expenseId: z.string().min(1),
+        title: z.string().trim().min(1).max(40),
+        amountCents: z.number().int().positive(),
+        payerId: z.string().min(1),
+        participantIds: z.array(z.string().min(1)).min(1),
+        shares: z
+          .array(
+            z.object({
+              memberId: z.string().min(1),
+              cents: z.number().int().nonnegative(),
+            }),
+          )
+          .optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireMember(sql, data.groupId, context.userId);
+    const rows = await sql<{
+      id: string;
+      title: string;
+      amount_cents: number;
+      payer_id: string;
+      created_by: string;
+      deleted_at: string | null;
+      settlement_id: string | null;
+    }>`
+      select id, title, amount_cents, payer_id, created_by,
+             deleted_at::text as deleted_at, settlement_id
+      from group_expenses
+      where id = ${data.expenseId} and group_id = ${data.groupId}
+      limit 1
+    `;
+    const current = rows[0];
+    if (!current) throw new Error("找不到这条账单");
+    if (current.created_by !== context.userId) {
+      throw new Error("只有创建人可以修改这条账单");
+    }
+    if (current.settlement_id) throw new Error("这笔账单已经结算，不能再改");
+    if (current.deleted_at) throw new Error("这条账单已经删除，不能再改");
+
+    const members = await sql<{ user_id: string }>`
+      select user_id from group_members
+      where group_id = ${data.groupId} and removed_at is null
+    `;
+    const allowed = new Set(members.map((member) => member.user_id));
+    if (!allowed.has(data.payerId)) throw new Error("付款人不在群组里");
+    const participants = [...new Set(data.participantIds)].filter((id) => allowed.has(id));
+    if (participants.length === 0) throw new Error("至少选择一位一起分摊的人");
+    const shares = normalizeExpenseShares({
+      participantIds: participants,
+      amountCents: data.amountCents,
+      shares: data.shares,
+    });
+
+    const shareRows = await sql<{ user_id: string; amount_cents: number | null }>`
+      select user_id, amount_cents
+      from group_expense_shares
+      where expense_id = ${data.expenseId}
+    `;
+    const beforeIds = shareRows.map((row) => row.user_id);
+    const customCount = shareRows.filter((row) => row.amount_cents != null).length;
+    const beforeShares =
+      shareRows.length > 0 && customCount === shareRows.length
+        ? shareRows.map((row) => ({
+            memberId: row.user_id,
+            cents: Number(row.amount_cents),
+          }))
+        : undefined;
+    const changes = diffExpenseEdits(
+      {
+        title: current.title,
+        amountCents: Number(current.amount_cents),
+        payerId: current.payer_id,
+        participantIds: beforeIds,
+        shares: beforeShares,
+      },
+      {
+        title: data.title,
+        amountCents: data.amountCents,
+        payerId: data.payerId,
+        participantIds: participants,
+        shares,
+      },
+    );
+    if (changes.length === 0) return { ok: true as const, changed: false as const };
+
+    const editId = newId();
+    const updated = await sql<{ id: string }>`
+      update group_expenses
+      set title = ${data.title},
+          amount_cents = ${data.amountCents},
+          payer_id = ${data.payerId}
+      where id = ${data.expenseId}
+        and group_id = ${data.groupId}
+        and created_by = ${context.userId}
+        and deleted_at is null
+        and settlement_id is null
+      returning id
+    `;
+    if (!updated[0]) {
+      throw new Error("这笔账单刚被别人改过，请刷新后再试");
+    }
+    try {
+      await replaceExpenseShares(sql, data.expenseId, participants, shares);
+      await sql`
+        insert into group_expense_edits
+          (id, expense_id, group_id, edited_by, changes)
+        values (
+          ${editId},
+          ${data.expenseId},
+          ${data.groupId},
+          ${context.userId},
+          ${JSON.stringify(changes)}::jsonb
+        )
+      `;
+    } catch (err) {
+      await sql`
+        update group_expenses
+        set title = ${current.title},
+            amount_cents = ${current.amount_cents},
+            payer_id = ${current.payer_id}
+        where id = ${data.expenseId}
+      `.catch(() => undefined);
+      await replaceExpenseShares(sql, data.expenseId, beforeIds, beforeShares).catch(
+        () => undefined,
+      );
+      throw err;
+    }
+    return { ok: true as const, changed: true as const, id: editId };
   });
 
 export const removeGroupExpense = createServerFn({ method: "POST" })
@@ -695,9 +874,7 @@ export const settleGroup = createServerFn({ method: "POST" })
         throw new Error("有账单刚被别人结算或删除，请刷新后再试");
       }
     } catch (err) {
-      await sql`delete from group_settlements where id = ${settlement.id}`.catch(
-        () => undefined,
-      );
+      await sql`delete from group_settlements where id = ${settlement.id}`.catch(() => undefined);
       throw err;
     }
     return { id: settlement.id };

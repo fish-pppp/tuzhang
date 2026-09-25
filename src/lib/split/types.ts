@@ -9,6 +9,26 @@ export type ExpenseShare = {
   cents: number;
 };
 
+/** One person's split as stored on an edit. `cents: null` means equal AA. */
+export type ShareSnapshot = {
+  memberId: string;
+  cents: number | null;
+};
+
+export type ExpenseEditChange =
+  | { field: "title"; before: string; after: string }
+  | { field: "amountCents"; before: number; after: number }
+  | { field: "payerId"; before: string; after: string }
+  | { field: "shares"; before: ShareSnapshot[]; after: ShareSnapshot[] };
+
+export type ExpenseEdit = {
+  id: string;
+  expenseId: string;
+  editedBy: string;
+  editedAt: string;
+  changes: ExpenseEditChange[];
+};
+
 export type ExpensePhoto = {
   id: string;
   /** Same-origin `/api/expense-photo/<id>` or a compressed JPEG data URL (demo). */
@@ -29,6 +49,8 @@ export type Expense = {
   /** Optional receipt / proof photos. Omitted/empty means none. */
   photos?: ExpensePhoto[];
   createdAt: string;
+  /** Account that created this bill. Only they may edit its details. */
+  createdBy?: string | null;
   /** Set when the bill is soft-deleted; omitted/empty means still active. */
   deletedAt?: string | null;
   deletedBy?: string | null;
@@ -69,6 +91,8 @@ export type Trip = {
   members: Member[];
   expenses: Expense[];
   settlements?: Settlement[];
+  /** Append-only edits, newest first. Omitted when a trip has none. */
+  expenseEdits?: ExpenseEdit[];
 };
 
 export type PersonLedger = {

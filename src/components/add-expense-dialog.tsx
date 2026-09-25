@@ -32,6 +32,7 @@ export function AddExpenseDialog({
   onAdd,
   onUploadPhoto,
   onDiscardPhotos,
+  initialExpense,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,19 +41,19 @@ export function AddExpenseDialog({
   onAdd: (
     input: Omit<
       Expense,
-      "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
+      "id" | "createdAt" | "createdBy" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
     >,
   ) => void | Promise<void>;
   onUploadPhoto?: (base64: string) => Promise<ExpensePhoto>;
   onDiscardPhotos?: (ids: string[]) => void | Promise<void>;
+  /** Set to edit an existing bill instead of creating one. Photos stay as they are. */
+  initialExpense?: Expense | null;
 }) {
   const fallbackPayer = defaultPayerId ?? trip.members[0]?.id ?? "";
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
   const [payerId, setPayerId] = useState(fallbackPayer);
-  const [participantIds, setParticipantIds] = useState<string[]>(
-    trip.members.map((m) => m.id),
-  );
+  const [participantIds, setParticipantIds] = useState<string[]>(trip.members.map((m) => m.id));
   const [splitMode, setSplitMode] = useState<SplitMode>("equal");
   const [customYuan, setCustomYuan] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +62,8 @@ export function AddExpenseDialog({
   const [photoBusy, setPhotoBusy] = useState(false);
   const photosRef = useRef<ExpensePhoto[]>([]);
   const submittedRef = useRef(false);
+  const formReady = useRef(false);
+  const editing = Boolean(initialExpense);
   photosRef.current = photos;
 
   function fillEqualCustom(ids: string[], yuan: string) {
@@ -77,7 +80,41 @@ export function AddExpenseDialog({
   }
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      formReady.current = false;
+      return;
+    }
+    if (formReady.current) return;
+    formReady.current = true;
+    submittedRef.current = false;
+    setError(null);
+    setPending(false);
+    setPhotoBusy(false);
+    setPhotos([]);
+    if (initialExpense) {
+      const memberIds = new Set(trip.members.map((member) => member.id));
+      const ids = initialExpense.participantIds.filter((id) => memberIds.has(id));
+      setTitle(initialExpense.title);
+      setAmount((initialExpense.amountCents / 100).toFixed(2));
+      setPayerId(
+        memberIds.has(initialExpense.payerId)
+          ? initialExpense.payerId
+          : (defaultPayerId ?? trip.members[0]?.id ?? ""),
+      );
+      setParticipantIds(ids.length > 0 ? ids : trip.members.map((member) => member.id));
+      if (initialExpense.shares && initialExpense.shares.length > 0) {
+        setSplitMode("custom");
+        const next: Record<string, string> = {};
+        for (const share of initialExpense.shares) {
+          next[share.memberId] = (share.cents / 100).toFixed(2);
+        }
+        setCustomYuan(next);
+      } else {
+        setSplitMode("equal");
+        setCustomYuan({});
+      }
+      return;
+    }
     const ids = trip.members.map((m) => m.id);
     setPayerId(defaultPayerId ?? trip.members[0]?.id ?? "");
     setParticipantIds(ids);
@@ -85,12 +122,7 @@ export function AddExpenseDialog({
     setAmount("");
     setSplitMode("equal");
     setCustomYuan({});
-    setError(null);
-    setPending(false);
-    setPhotos([]);
-    setPhotoBusy(false);
-    submittedRef.current = false;
-  }, [open, defaultPayerId, trip.members]);
+  }, [open, defaultPayerId, initialExpense, trip.members]);
 
   const allSelected = participantIds.length === trip.members.length;
   const amountCents = parseYuan(amount);
@@ -111,8 +143,7 @@ export function AddExpenseDialog({
   }, [customYuan, participantIds, splitMode]);
 
   const customTotal = customShares?.reduce((sum, s) => sum + s.cents, 0) ?? null;
-  const customDiff =
-    amountCents != null && customTotal != null ? customTotal - amountCents : null;
+  const customDiff = amountCents != null && customTotal != null ? customTotal - amountCents : null;
 
   function resetForm() {
     setTitle("");
@@ -201,7 +232,7 @@ export function AddExpenseDialog({
       shares = normalizeExpenseShares({
         participantIds,
         amountCents: cents,
-        shares: splitMode === "custom" ? customShares ?? undefined : undefined,
+        shares: splitMode === "custom" ? (customShares ?? undefined) : undefined,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "分摊金额不对");
@@ -243,12 +274,17 @@ export function AddExpenseDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>记一笔</DialogTitle>
+          <DialogTitle>{editing ? "修改账单" : "记一笔"}</DialogTitle>
           <DialogDescription>
-            谁先垫了钱。可以平均 AA，也可以按人填不同的价。小票可以附多张照片。
+            {editing
+              ? "改金额、标题、付款人或分摊。保存后会记下改前改后。"
+              : "谁先垫了钱。可以平均 AA，也可以按人填不同的价。小票可以附多张照片。"}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={(e) => void onSubmit(e)} className="flex min-h-0 flex-col gap-5 overflow-y-auto">
+        <form
+          onSubmit={(e) => void onSubmit(e)}
+          className="flex min-h-0 flex-col gap-5 overflow-y-auto"
+        >
           <div className="space-y-2">
             <Label htmlFor="amount">金额</Label>
             <div className="relative">
@@ -272,8 +308,7 @@ export function AddExpenseDialog({
             </div>
             {splitMode === "equal" && perHead != null && (
               <p className="text-xs text-muted tabular-nums">
-                {participantIds.length} 人平摊，约 ¥
-                {(perHead / 100).toFixed(2)} / 人
+                {participantIds.length} 人平摊，约 ¥{(perHead / 100).toFixed(2)} / 人
               </p>
             )}
           </div>
@@ -425,16 +460,18 @@ export function AddExpenseDialog({
             ) : null}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="expense-photos">照片证明</Label>
-            <ExpensePhotoPicker
-              photos={photos}
-              disabled={pending}
-              pending={photoBusy}
-              onPickFiles={(files) => void onPickFiles(files)}
-              onRemove={onRemovePhoto}
-            />
-          </div>
+          {editing ? null : (
+            <div className="space-y-2">
+              <Label htmlFor="expense-photos">照片证明</Label>
+              <ExpensePhotoPicker
+                photos={photos}
+                disabled={pending}
+                pending={photoBusy}
+                onPickFiles={(files) => void onPickFiles(files)}
+                onRemove={onRemovePhoto}
+              />
+            </div>
+          )}
 
           {error && <p className="text-sm text-owe">{error}</p>}
 
@@ -443,7 +480,15 @@ export function AddExpenseDialog({
             className="h-12 w-full rounded-lg text-base"
             disabled={pending || photoBusy}
           >
-            {pending ? "记账中…" : photoBusy ? "处理照片…" : "记入账单"}
+            {pending
+              ? editing
+                ? "保存中…"
+                : "记账中…"
+              : photoBusy
+                ? "处理照片…"
+                : editing
+                  ? "保存修改"
+                  : "记入账单"}
           </Button>
         </form>
       </DialogContent>
