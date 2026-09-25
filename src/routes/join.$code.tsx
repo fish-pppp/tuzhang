@@ -12,7 +12,7 @@ export const Route = createFileRoute("/join/$code")({
 
 function JoinPage() {
   const { code } = Route.useParams();
-  const { user, isPending } = useCurrentUserState();
+  const { user, isPending, sessionTimedOut } = useCurrentUserState();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +39,21 @@ function JoinPage() {
     };
   }, [avatarUrl, code, displayName, isPending, navigate, queryClient, userId]);
 
+  if (sessionTimedOut) {
+    return (
+      <main className="grid min-h-dvh place-items-center px-6 text-center text-sm text-muted">
+        登录确认超时。
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-3 text-sm text-primary underline-offset-4 hover:underline"
+        >
+          重试
+        </button>
+      </main>
+    );
+  }
+
   if (isPending) {
     return (
       <main className="grid min-h-dvh place-items-center px-6 text-sm text-muted">
@@ -48,9 +63,7 @@ function JoinPage() {
   }
 
   if (!user) {
-    return (
-      <Navigate to="/login" search={{ redirect: `/join/${code}` }} />
-    );
+    return <Navigate to="/login" search={{ redirect: `/join/${code}` }} />;
   }
 
   if (error) {
@@ -71,8 +84,6 @@ function JoinPage() {
   }
 
   return (
-    <main className="grid min-h-dvh place-items-center px-6 text-sm text-muted">
-      正在加入群组…
-    </main>
+    <main className="grid min-h-dvh place-items-center px-6 text-sm text-muted">正在加入群组…</main>
   );
 }

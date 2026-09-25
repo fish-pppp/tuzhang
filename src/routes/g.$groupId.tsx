@@ -23,7 +23,7 @@ export const Route = createFileRoute("/g/$groupId")({
 
 function GroupPage() {
   const { groupId } = Route.useParams();
-  const { user, isPending: authPending } = useCurrentUserState();
+  const { user, isPending: authPending, sessionTimedOut } = useCurrentUserState();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const query = useQuery({
@@ -55,6 +55,20 @@ function GroupPage() {
     return () => window.clearTimeout(handle);
   }, [draftName, groupId, queryClient, trip]);
 
+  if (sessionTimedOut) {
+    return (
+      <PageShell>
+        登录确认超时。
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-3 text-sm text-primary underline-offset-4 hover:underline"
+        >
+          重试
+        </button>
+      </PageShell>
+    );
+  }
   if (authPending) {
     return <PageShell>正在确认登录…</PageShell>;
   }

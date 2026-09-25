@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { authClient, authEnabled } from "./client";
 
 /** Normalized user shape used across the app, auth on or off. */
@@ -24,12 +25,21 @@ export const DEV_USER: AppUser = {
   isDevFallback: true,
 };
 
+/** Stop spinning on “正在确认登录” if `/get-session` never settles. */
+const SESSION_CONFIRM_MS = 8_000;
+
 /** `useCurrentUserState()` result: the user plus the session-loading flag. */
 export type CurrentUserState = {
   /** The user — `null` BOTH while the session loads and when signed out. */
   user: AppUser | null;
   /** True while the session is still resolving — don't treat `user: null` as signed out yet. */
   isPending: boolean;
+  /**
+   * True when the session request has been pending longer than
+   * `SESSION_CONFIRM_MS`. The visitor should see a retry instead of an
+   * infinite “正在确认登录”.
+   */
+  sessionTimedOut: boolean;
 };
 
 /**
@@ -50,12 +60,23 @@ export type CurrentUserState = {
  *   if (isPending) return null;              // still resolving — don't redirect yet
  *   if (!user) return <RedirectToSignIn />;  // definitely signed out
  *
- * `authEnabled` is a module-level constant fixed at load, so the guarded hook
- * call keeps a stable hook order across every render of a given component.
+ * `authEnabled` is a module-level constant fixed at load. The session hook still
+ * runs when auth is disabled so hook order stays stable; its result is ignored.
  */
 export function useCurrentUserState(): CurrentUserState {
-  if (!authEnabled) return { user: DEV_USER, isPending: false };
+  // Always call the session hook. `authEnabled` is fixed at build time, but a
+  // conditional hook still fails the rules-of-hooks check.
   const { data, isPending } = authClient.useSession();
+  const [waitedTooLong, setWaitedTooLong] = useState(false);
+  useEffect(() => {
+    if (!authEnabled || !isPending) {
+      setWaitedTooLong(false);
+      return;
+    }
+    const handle = window.setTimeout(() => setWaitedTooLong(true), SESSION_CONFIRM_MS);
+    return () => window.clearTimeout(handle);
+  }, [isPending]);
+  if (!authEnabled) return { user: DEV_USER, isPending: false, sessionTimedOut: false };
   const user = data?.user;
   return {
     user: user
@@ -68,6 +89,7 @@ export function useCurrentUserState(): CurrentUserState {
         }
       : null,
     isPending,
+    sessionTimedOut: waitedTooLong && isPending,
   };
 }
 
