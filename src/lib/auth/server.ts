@@ -125,7 +125,14 @@ const databaseUrl = env("DATABASE_URL");
 // SAME DB as app data, including email/password users. Both use the Better Auth
 // schema from `migrations/0001_auth.sql`.
 const database = databaseUrl
-  ? new Pool({ connectionString: databaseUrl })
+  ? new Pool({
+      connectionString: databaseUrl,
+      max: 1,
+      connectionTimeoutMillis: 8_000,
+      idleTimeoutMillis: 10_000,
+      statement_timeout: 8_000,
+      query_timeout: 8_000,
+    })
   : { dialect: pgliteDialect(() => getPglite()), type: "postgres" as const };
 
 /** Session token cookie name. */

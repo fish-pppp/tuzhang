@@ -10,12 +10,26 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { friendlyAuthError } from "@/lib/errors";
 import { resolvePostLoginPath } from "@/lib/split/home-path";
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error("登录超时，请再试一次")), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export const Route = createFileRoute("/login")({
   validateSearch: (raw: Record<string, unknown>) => ({
     redirect:
-      typeof raw.redirect === "string" && raw.redirect.startsWith("/")
-        ? raw.redirect
-        : undefined,
+      typeof raw.redirect === "string" && raw.redirect.startsWith("/") ? raw.redirect : undefined,
   }),
   component: Login,
 });
@@ -23,6 +37,7 @@ export const Route = createFileRoute("/login")({
 function Login() {
   const { redirect } = Route.useSearch();
   const { user, isPending: sessionPending } = useCurrentUserState();
+  const userId = user?.id ?? null;
   const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -33,8 +48,10 @@ function Login() {
   const forgot = mode === "forgot";
 
   // Already signed in (e.g. pressed Back onto /login): skip the form.
+  // Depend on `userId`, not the user object — `useCurrentUserState` builds a
+  // new object every render, and that cleanup was cancelling the redirect.
   useEffect(() => {
-    if (sessionPending || !user || pending) return;
+    if (sessionPending || !userId || pending) return;
     let cancelled = false;
     void resolvePostLoginPath(redirect).then((path) => {
       if (!cancelled) window.location.replace(path);
@@ -42,7 +59,7 @@ function Login() {
     return () => {
       cancelled = true;
     };
-  }, [pending, redirect, sessionPending, user]);
+  }, [pending, redirect, sessionPending, userId]);
 
   async function onEmail(e: React.FormEvent) {
     e.preventDefault();
@@ -57,26 +74,38 @@ function Login() {
     }
     setPending(true);
     try {
+      const fetchOptions = { timeout: 12_000 };
       if (mode === "signup") {
         const { error: signUpError } = await authClient.signUp.email({
           email: email.trim(),
           password,
           name: name.trim(),
+          fetchOptions,
         });
         if (signUpError) throw new Error(friendlyAuthError(signUpError.message, "注册失败"));
       } else {
         const { error: signInError } = await authClient.signIn.email({
           email: email.trim(),
           password,
+          fetchOptions,
         });
         if (signInError) throw new Error(friendlyAuthError(signInError.message, "登录失败"));
       }
-      await authClient.getSession();
-      window.location.href = await resolvePostLoginPath(redirect);
-      // Keep the button disabled while the browser navigates away.
+      // The session cookie is already set. A follow-up getSession can stay
+      // pending forever if that request is aborted, which left the button on
+      // “请稍候…”. Open the book directly, and if that lookup stalls, reload
+      // home so the cookie can finish signing in.
+      try {
+        window.location.href = await withTimeout(resolvePostLoginPath(redirect), 12_000);
+      } catch {
+        window.location.href =
+          redirect && redirect.startsWith("/") && redirect !== "/" ? redirect : "/";
+      }
       return;
     } catch (err) {
-      setError(friendlyAuthError(err instanceof Error ? err.message : null, "登录失败"));
+      const message = err instanceof Error ? err.message : null;
+      const timedOut = message != null && /abort|timed out|timeout|登录超时/i.test(message);
+      setError(timedOut ? "登录超时，请再试一次" : friendlyAuthError(message, "登录失败"));
     }
     setPending(false);
   }
@@ -84,9 +113,7 @@ function Login() {
   return (
     <main className="grid min-h-dvh place-items-center px-6 py-12">
       <div className="w-full max-w-sm rounded-2xl bg-surface p-6 shadow-card sm:p-8">
-        <p className="text-xs font-medium tracking-[0.18em] text-muted uppercase">
-          途账
-        </p>
+        <p className="text-xs font-medium tracking-[0.18em] text-muted uppercase">途账</p>
         <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
           {forgot ? "找回密码" : "登录后进入你的账本"}
         </h1>

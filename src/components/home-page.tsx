@@ -16,7 +16,7 @@ function Status({ children }: { children: ReactNode }) {
 
 /** Signed-in visitors land on a group they created; guests still see the demo. */
 export function HomePage({ demo }: { demo?: boolean }) {
-  const { user, isPending } = useCurrentUserState();
+  const { user, isPending, sessionTimedOut } = useCurrentUserState();
   const homeQuery = useQuery({
     queryKey: ["home-group"],
     queryFn: () => ensureMyHomeGroup(),
@@ -25,15 +25,28 @@ export function HomePage({ demo }: { demo?: boolean }) {
     retry: (count, err) => !isUnauthorizedError(err) && count < 1,
   });
 
+  if (sessionTimedOut) {
+    return (
+      <Status>
+        登录确认超时。
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-3 text-sm text-primary underline-offset-4 hover:underline"
+        >
+          重试
+        </button>
+      </Status>
+    );
+  }
+
   if (isPending) {
     return <Status>正在确认登录…</Status>;
   }
 
   if (user && !demo) {
     if (homeQuery.data?.id) {
-      return (
-        <Navigate to="/g/$groupId" params={{ groupId: homeQuery.data.id }} />
-      );
+      return <Navigate to="/g/$groupId" params={{ groupId: homeQuery.data.id }} />;
     }
     if (homeQuery.isPending) {
       return <Status>正在打开你的账本…</Status>;

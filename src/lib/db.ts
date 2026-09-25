@@ -91,7 +91,17 @@ function createNeonSql(): Promise<Sql> {
     types.setTypeParser(OID_INT8, Number);
     types.setTypeParser(OID_DATE, identity);
     types.setTypeParser(OID_INTERVAL, identity);
-    const pool = new Pool({ connectionString: databaseUrl });
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      // One connection per warm instance. The default pool (max 10, wait
+      // forever) can pin every Neon slot after a deploy; signed-in
+      // /get-session then never returns and the UI stays on “正在确认登录”.
+      max: 1,
+      connectionTimeoutMillis: 8_000,
+      idleTimeoutMillis: 10_000,
+      statement_timeout: 8_000,
+      query_timeout: 8_000,
+    });
     return toSql(async <T>(text: string, params: unknown[]) => {
       const res = await pool.query(text, params);
       return res.rows as T[];
