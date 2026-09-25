@@ -5,6 +5,7 @@ import { AuthSlot } from "@/components/auth-slot";
 import { DeleteExpenseDialog } from "@/components/delete-expense-dialog";
 import { ExpenseDayList } from "@/components/expense-card";
 import { ExpenseDetailDialog } from "@/components/expense-detail-dialog";
+import { ExpenseEditHistory } from "@/components/expense-edit-history";
 import { GroupMembersDialog } from "@/components/group-members-dialog";
 import { GroupSwitcher } from "@/components/group-switcher";
 import { MemberAvatar } from "@/components/member-avatar";
@@ -14,6 +15,7 @@ import { SettleDialog } from "@/components/settle-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { computeLedger, expenseInvolves } from "@/lib/split/calc";
+import { canEditExpense } from "@/lib/split/expense-edit";
 import { formatStamp, groupByDay } from "@/lib/split/date";
 import { downloadMarkdown, exportFileName, exportTripMarkdown } from "@/lib/split/export-md";
 import { formatMoney } from "@/lib/split/money";
@@ -42,7 +44,14 @@ export type TripViewProps = {
   onAddExpense: (
     input: Omit<
       Expense,
-      "id" | "createdAt" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
+      "id" | "createdAt" | "createdBy" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
+    >,
+  ) => void | Promise<void>;
+  onUpdateExpense?: (
+    id: string,
+    input: Omit<
+      Expense,
+      "id" | "createdAt" | "createdBy" | "deletedAt" | "deletedBy" | "deleteReason" | "settlementId"
     >,
   ) => void | Promise<void>;
   onUploadExpensePhoto?: (base64: string) => Promise<ExpensePhoto>;
@@ -66,6 +75,7 @@ export function TripView({
   formerMembers,
   onRename,
   onAddExpense,
+  onUpdateExpense,
   onUploadExpensePhoto,
   onDiscardExpensePhotos,
   onRemoveExpense,
@@ -77,6 +87,8 @@ export function TripView({
 }: TripViewProps) {
   const [tab, setTab] = useState<BoardTab>("mine");
   const [expenseOpen, setExpenseOpen] = useState(false);
+  const [editing, setEditing] = useState<Expense | null>(null);
+  const [focusExpenseId, setFocusExpenseId] = useState<string | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const [detail, setDetail] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState<Expense | null>(null);
@@ -88,28 +100,27 @@ export function TripView({
   const settlements = useMemo(() => tripSettlements(trip), [trip]);
   const openBillCount = useMemo(() => openExpenses(trip).length, [trip]);
   const memberMap = useMemo(
-    () =>
-      Object.fromEntries(
-        [...trip.members, ...(formerMembers ?? [])].map((m) => [m.id, m]),
-      ),
+    () => Object.fromEntries([...trip.members, ...(formerMembers ?? [])].map((m) => [m.id, m])),
     [formerMembers, trip.members],
   );
-  const myNet = meId
-    ? (ledger.perPerson.find((p) => p.memberId === meId)?.netCents ?? 0)
-    : 0;
+  const myNet = meId ? (ledger.perPerson.find((p) => p.memberId === meId)?.netCents ?? 0) : 0;
 
-  const activeExpenses = useMemo(
-    () => trip.expenses.filter(isActiveExpense),
-    [trip.expenses],
-  );
+  const activeExpenses = useMemo(() => trip.expenses.filter(isActiveExpense), [trip.expenses]);
   const myExpenses = useMemo(
-    () =>
-      meId ? activeExpenses.filter((e) => expenseInvolves(e, meId)) : [],
+    () => (meId ? activeExpenses.filter((e) => expenseInvolves(e, meId)) : []),
     [activeExpenses, meId],
   );
   const deletedExpenses = useMemo(
     () => trip.expenses.filter((e) => !isActiveExpense(e)),
     [trip.expenses],
+  );
+  const expenseById = useMemo(
+    () => Object.fromEntries(trip.expenses.map((expense) => [expense.id, expense])),
+    [trip.expenses],
+  );
+  const detailEdits = useMemo(
+    () => (trip.expenseEdits ?? []).filter((edit) => edit.expenseId === detail?.id),
+    [detail?.id, trip.expenseEdits],
   );
 
   useEffect(() => {
@@ -119,6 +130,14 @@ export function TripView({
     });
   }, [trip.expenses]);
 
+  useEffect(() => {
+    if (!focusExpenseId) return;
+    const next = trip.expenses.find((expense) => expense.id === focusExpenseId);
+    if (!next) return;
+    setDetail(next);
+    setFocusExpenseId(null);
+  }, [focusExpenseId, trip.expenses]);
+
   function exportRecords() {
     downloadMarkdown(exportFileName(trip.name), exportTripMarkdown(trip));
     setExported(true);
@@ -126,16 +145,19 @@ export function TripView({
   }
 
   const dialogOpen =
-    expenseOpen || membersOpen || Boolean(deleting) || settleOpen || Boolean(detail);
+    expenseOpen ||
+    Boolean(editing) ||
+    membersOpen ||
+    Boolean(deleting) ||
+    settleOpen ||
+    Boolean(detail);
 
   return (
     <div className="relative mx-auto min-h-dvh max-w-5xl px-4 pb-28 pt-6 sm:px-6">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex items-center gap-2">
-            <p className="text-xs font-medium tracking-[0.18em] text-muted uppercase">
-              途账
-            </p>
+            <p className="text-xs font-medium tracking-[0.18em] text-muted uppercase">途账</p>
             <GroupSwitcher
               currentLabel={variant === "group" ? "群组" : "示例"}
               currentGroupId={variant === "group" ? trip.id : null}
@@ -217,11 +239,17 @@ export function TripView({
             onOpen={setDetail}
             empty="还没有支出。点右下角记一笔。"
           />
-          {deletedExpenses.length > 0 ? (
-            <DeletedDayList
-              expenses={deletedExpenses}
-              onOpen={setDetail}
+          <section className="mt-8">
+            <h3 className="mb-3 px-1 text-xs font-medium text-muted">修改记录</h3>
+            <ExpenseEditHistory
+              edits={trip.expenseEdits ?? []}
+              membersById={memberMap}
+              expensesById={expenseById}
+              onOpenExpense={setDetail}
             />
+          </section>
+          {deletedExpenses.length > 0 ? (
+            <DeletedDayList expenses={deletedExpenses} onOpen={setDetail} />
           ) : null}
           {variant === "demo" ? <DemoBillActions /> : null}
         </div>
@@ -259,11 +287,32 @@ export function TripView({
         onUploadPhoto={onUploadExpensePhoto}
         onDiscardPhotos={onDiscardExpensePhotos}
       />
+      <AddExpenseDialog
+        open={Boolean(editing)}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+        trip={trip}
+        defaultPayerId={editing?.payerId ?? meId}
+        initialExpense={editing}
+        onAdd={async (input) => {
+          if (!editing || !onUpdateExpense) return;
+          const id = editing.id;
+          await onUpdateExpense(id, input);
+          setFocusExpenseId(id);
+        }}
+      />
       <ExpenseDetailDialog
         expense={detail}
         meId={meId}
         membersById={memberMap}
+        edits={detailEdits}
+        canEdit={Boolean(detail && onUpdateExpense && canEditExpense(detail, meId))}
         onClose={() => setDetail(null)}
+        onEdit={(expense) => {
+          setDetail(null);
+          setEditing(expense);
+        }}
         onDelete={(expense) => {
           setDetail(null);
           setDeleting(expense);
@@ -303,13 +352,7 @@ export function TripView({
   );
 }
 
-function WhoAmI({
-  members,
-  onSetMe,
-}: {
-  members: Member[];
-  onSetMe?: (id: string) => void;
-}) {
+function WhoAmI({ members, onSetMe }: { members: Member[]; onSetMe?: (id: string) => void }) {
   return (
     <section className="rounded-2xl bg-surface p-5 shadow-card">
       <h2 className="font-display text-lg font-semibold">你是谁？</h2>
@@ -408,12 +451,7 @@ function SettleTab({
     <section className="rounded-2xl bg-surface p-4 shadow-card sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-2">
         <h2 className="font-display text-lg font-semibold">谁付给谁</h2>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={openBillCount === 0}
-          onClick={onSettle}
-        >
+        <Button variant="ghost" size="sm" disabled={openBillCount === 0} onClick={onSettle}>
           提前结算
         </Button>
       </div>
@@ -439,9 +477,7 @@ function SettleTab({
                     <ArrowRight className="mx-1 inline size-3.5 text-subtle" />
                     <span className="font-medium">{to.name}</span>
                   </p>
-                  <p className="text-xs text-muted tabular-nums">
-                    转 {formatMoney(t.cents)}
-                  </p>
+                  <p className="text-xs text-muted tabular-nums">转 {formatMoney(t.cents)}</p>
                 </div>
                 <MemberAvatar member={to} size="sm" />
               </li>
@@ -458,10 +494,7 @@ function SettleTab({
           >
             <span>已结算 {settlements.length} 次</span>
             <ChevronDown
-              className={cn(
-                "size-4 text-subtle transition-transform",
-                pastOpen && "rotate-180",
-              )}
+              className={cn("size-4 text-subtle transition-transform", pastOpen && "rotate-180")}
             />
           </button>
           {pastOpen ? (
@@ -469,9 +502,7 @@ function SettleTab({
               {settlements.map((settlement, index) => (
                 <li key={settlement.id} className="rounded-lg bg-bg-elevated px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">
-                      第 {settlements.length - index} 次
-                    </p>
+                    <p className="text-sm font-medium">第 {settlements.length - index} 次</p>
                     <Badge variant="settled">已结算</Badge>
                   </div>
                   <p className="mt-1 text-xs text-subtle">
@@ -554,6 +585,7 @@ export function TripBoard() {
   const setHydrated = useTripStore((s) => s.setHydrated);
   const renameTrip = useTripStore((s) => s.renameTrip);
   const addExpense = useTripStore((s) => s.addExpense);
+  const updateExpense = useTripStore((s) => s.updateExpense);
   const removeExpense = useTripStore((s) => s.removeExpense);
   const settleOpen = useTripStore((s) => s.settleOpen);
   const setMeId = useTripStore((s) => s.setMeId);
@@ -572,6 +604,7 @@ export function TripBoard() {
       variant="demo"
       onRename={renameTrip}
       onAddExpense={addExpense}
+      onUpdateExpense={updateExpense}
       onRemoveExpense={removeExpense}
       onSettle={settleOpen}
       onSetMe={setMeId}

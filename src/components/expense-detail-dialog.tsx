@@ -1,3 +1,4 @@
+import { ExpenseEditHistory } from "@/components/expense-edit-history";
 import { ExpensePhotoStrip } from "@/components/expense-photos";
 import { MemberAvatar } from "@/components/member-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,7 @@ import {
   isOpenExpense,
   isSettledExpense,
   type Expense,
+  type ExpenseEdit,
   type Member,
 } from "@/lib/split/types";
 
@@ -23,14 +25,20 @@ export function ExpenseDetailDialog({
   expense,
   meId,
   membersById,
+  edits,
+  canEdit,
   onClose,
   onDelete,
+  onEdit,
 }: {
   expense: Expense | null;
   meId: string | null;
   membersById: Record<string, Member>;
+  edits: ExpenseEdit[];
+  canEdit: boolean;
   onClose: () => void;
   onDelete?: (expense: Expense) => void;
+  onEdit?: (expense: Expense) => void;
 }) {
   const open = Boolean(expense);
   const payer = expense ? membersById[expense.payerId] : undefined;
@@ -42,6 +50,7 @@ export function ExpenseDetailDialog({
       ? slices.filter((s) => s.memberId !== meId).reduce((sum, s) => sum + s.cents, 0)
       : 0;
   const canDelete = Boolean(expense && onDelete && isOpenExpense(expense));
+  const creatorName = expense?.createdBy ? (membersById[expense.createdBy]?.name ?? "未知") : null;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -53,17 +62,14 @@ export function ExpenseDetailDialog({
               <DialogDescription>
                 {formatStamp(expense.createdAt) || "刚才"}
                 {payer ? ` · ${payer.name}付` : ""}
+                {creatorName ? ` · 创建人 ${creatorName}` : ""}
               </DialogDescription>
             </DialogHeader>
             <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
               <div className="grid grid-cols-2 gap-2">
                 <AmountBox label="总价" value={formatMoney(expense.amountCents)} />
                 {mine ? (
-                  <AmountBox
-                    label="我要付"
-                    value={formatMoney(myShare)}
-                    tone="owe"
-                  />
+                  <AmountBox label="我要付" value={formatMoney(myShare)} tone="owe" />
                 ) : (
                   <AmountBox label="付款人" value={payer?.name ?? "未知"} />
                 )}
@@ -102,17 +108,30 @@ export function ExpenseDetailDialog({
                         {slice.memberId === meId ? (
                           <span className="ml-1 text-muted">我</span>
                         ) : null}
-                        {isPayer ? (
-                          <span className="ml-1 text-xs text-subtle">付</span>
-                        ) : null}
+                        {isPayer ? <span className="ml-1 text-xs text-subtle">付</span> : null}
                       </span>
-                      <span className="text-sm tabular-nums">
-                        {formatMoney(slice.cents)}
-                      </span>
+                      <span className="text-sm tabular-nums">{formatMoney(slice.cents)}</span>
                     </li>
                   );
                 })}
               </ul>
+
+              <section className="space-y-2">
+                <h3 className="text-xs font-medium text-muted">修改记录</h3>
+                <ExpenseEditHistory
+                  edits={edits}
+                  membersById={membersById}
+                  empty="这条账单还没有修改记录。"
+                />
+              </section>
+
+              {canEdit ? (
+                <Button type="button" onClick={() => onEdit?.(expense)}>
+                  修改明细
+                </Button>
+              ) : expense.createdBy && isOpenExpense(expense) ? (
+                <p className="text-xs text-muted">只有创建人可以修改明细。</p>
+              ) : null}
 
               {canDelete ? (
                 <Button
@@ -132,15 +151,7 @@ export function ExpenseDetailDialog({
   );
 }
 
-function AmountBox({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "owe";
-}) {
+function AmountBox({ label, value, tone }: { label: string; value: string; tone?: "owe" }) {
   return (
     <div className="rounded-xl bg-bg-elevated px-3 py-3">
       <p className="text-xs text-muted">{label}</p>
