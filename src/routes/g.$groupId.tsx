@@ -13,6 +13,7 @@ import {
   removeGroupMember,
   renameGroup,
   settleGroup,
+  updateGroupFxFee,
   updateMyName,
 } from "@/lib/split/group-api";
 import { discardExpensePhotos, uploadExpensePhoto } from "@/lib/split/photo-api";
@@ -121,6 +122,11 @@ function GroupPage() {
         groupId={groupId}
         createdBy={trip.createdBy}
         formerMembers={trip.formerMembers}
+        fxFeeRate={trip.fxFeeRate}
+        onUpdateFxFee={async (feePercent) => {
+          await updateGroupFxFee({ data: { groupId, feePercent } });
+          await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
+        }}
         onRename={setDraftName}
         onAddExpense={async (input) => {
           await addGroupExpense({
@@ -132,6 +138,12 @@ function GroupPage() {
               participantIds: input.participantIds,
               shares: input.shares,
               photoIds: input.photos?.map((photo) => photo.id),
+              currency: input.currency,
+              originalMinor: input.originalMinor,
+              fxMidRate: input.fx?.midRate,
+              fxQuotedAt: input.fx?.quotedAt,
+              fxCached: input.fx?.cached,
+              fxFeeRate: input.fx?.feeRate,
             },
           });
           await queryClient.invalidateQueries({ queryKey: ["group", groupId] });
@@ -147,6 +159,12 @@ function GroupPage() {
               payerId: input.payerId,
               participantIds: input.participantIds,
               shares: input.shares,
+              currency: input.currency,
+              originalMinor: input.originalMinor,
+              fxMidRate: input.fx?.midRate,
+              fxQuotedAt: input.fx?.quotedAt,
+              fxCached: input.fx?.cached,
+              fxFeeRate: input.fx?.feeRate,
             },
           });
           await queryClient.invalidateQueries({ queryKey: ["group", groupId] });

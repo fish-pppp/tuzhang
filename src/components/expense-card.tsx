@@ -3,6 +3,7 @@ import { MemberAvatar } from "@/components/member-avatar";
 import { expenseInvolves } from "@/lib/split/calc";
 import { groupByDay } from "@/lib/split/date";
 import { expenseCardLine, expenseCardPeopleIds } from "@/lib/split/expense-line";
+import { formatCurrencyAmount, isForeignCurrency } from "@/lib/split/fx.mjs";
 import { formatMoney } from "@/lib/split/money";
 import { isSettledExpense, type Expense, type Member } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,11 @@ export function ExpenseCard({
   const peopleNames = expenseCardPeopleIds(expense)
     .map((id) => membersById[id]?.name)
     .filter((name): name is string => Boolean(name));
+  const foreign =
+    isForeignCurrency(expense.currency ?? "CNY") && expense.originalMinor != null && expense.fx;
+  const amountLabel = foreign
+    ? formatCurrencyAmount(expense.currency ?? "CNY", expense.originalMinor ?? 0)
+    : formatMoney(expense.amountCents);
 
   return (
     <button
@@ -39,16 +45,12 @@ export function ExpenseCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <p className="min-w-0 truncate font-medium">{expense.title}</p>
-        <p className="shrink-0 font-display text-base font-semibold tabular-nums">
-          {formatMoney(expense.amountCents)}
-        </p>
+        <p className="shrink-0 font-display text-base font-semibold tabular-nums">{amountLabel}</p>
       </div>
       <div className="flex items-center gap-2">
         <CardPeople expense={expense} membersById={membersById} />
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {mine ? (
-            <p className="text-xs tabular-nums text-owe">{line}</p>
-          ) : null}
+          {mine ? <p className="text-xs tabular-nums text-owe">{line}</p> : null}
           {photoCount > 0 ? (
             <span className="inline-flex items-center gap-0.5 text-[11px] text-subtle">
               <Image className="size-3" />
@@ -74,8 +76,7 @@ function CardPeople({
     .filter((member): member is Member => Boolean(member));
   if (people.length === 0) return null;
 
-  const overflow =
-    people.length > MAX_CARD_FACES ? people.length - (MAX_CARD_FACES - 1) : 0;
+  const overflow = people.length > MAX_CARD_FACES ? people.length - (MAX_CARD_FACES - 1) : 0;
   const visible = overflow > 0 ? people.slice(0, MAX_CARD_FACES - 1) : people;
   const payer = visible.find((person) => person.id === expense.payerId) ?? visible[0];
   const others = visible.filter((person) => person.id !== payer?.id);
@@ -98,10 +99,7 @@ function CardPeople({
       {others.length > 0 ? (
         <span className="ml-1.5 flex min-w-0 items-center">
           {others.map((person, i) => (
-            <span
-              key={person.id}
-              className={cn("relative shrink-0", i > 0 && "-ml-1.5")}
-            >
+            <span key={person.id} className={cn("relative shrink-0", i > 0 && "-ml-1.5")}>
               <MemberAvatar
                 member={person}
                 size="xs"

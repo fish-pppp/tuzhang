@@ -1,5 +1,6 @@
 import { APP_UPDATED_LABEL, APP_VERSION } from "@/lib/app-version";
 import { computeLedger, expenseSplitLabel, shareBreakdown } from "./calc";
+import { formatCurrencyAmount, formatFeePercent, formatFxPair, isForeignCurrency } from "./fx.mjs";
 import { formatMoney } from "./money";
 import { tripSettlements } from "./settlement";
 import {
@@ -27,20 +28,33 @@ function shanghaiStamp(iso: string): string {
   }).format(date);
 }
 
+function fxExportLines(expense: Expense): string[] {
+  const currency = expense.currency ?? "CNY";
+  if (!isForeignCurrency(currency) || expense.originalMinor == null || !expense.fx) return [];
+  const percent = formatFeePercent(expense.fx.feeRate) ?? expense.fx.feeRate;
+  const quoteLabel = expense.fx.cached ? "缓存中间价" : "实时中间价";
+  return [
+    `- 原币：${formatCurrencyAmount(currency, expense.originalMinor)}`,
+    `- ${quoteLabel}：${formatFxPair(currency, expense.fx.midRate)}（取价时间 ${shanghaiStamp(expense.fx.quotedAt)}）${
+      expense.fx.cached ? `（缓存于 ${shanghaiStamp(expense.fx.cachedAt ?? "")}）` : ""
+    }`,
+    `- 银行换汇手续费：${percent}%`,
+    `- 实际使用汇率：${formatFxPair(currency, expense.fx.rate)}`,
+  ];
+}
+
 function memberName(members: Map<string, Member>, id: string): string {
   return members.get(id)?.name ?? "未知";
 }
 
-function expenseBlock(
-  expense: Expense,
-  members: Map<string, Member>,
-): string[] {
+function expenseBlock(expense: Expense, members: Map<string, Member>): string[] {
   const payer = memberName(members, expense.payerId);
   const slices = shareBreakdown(expense);
   const lines = [
     `### ${expense.title}`,
     "",
     `- 金额：${formatMoney(expense.amountCents)}`,
+    ...fxExportLines(expense),
     `- 付款：${payer}`,
     `- 分摊：${expenseSplitLabel(expense)}${isCustomSplit(expense) ? "（不是人均 AA）" : ""}`,
     `- 记账：${shanghaiStamp(expense.createdAt)}`,
@@ -109,17 +123,13 @@ function settlementBlock(
 }
 
 export function exportTripMarkdown(trip: Trip): string {
-  const members = new Map(
-    trip.members.map((m) => [m.id, m] as const),
-  );
+  const members = new Map(trip.members.map((m) => [m.id, m] as const));
   const ledger = computeLedger(trip);
-  const settlements = [...tripSettlements(trip)].sort(
-    (a, b) => a.createdAt.localeCompare(b.createdAt),
+  const settlements = [...tripSettlements(trip)].sort((a, b) =>
+    a.createdAt.localeCompare(b.createdAt),
   );
   const open = trip.expenses.filter(isOpenExpense);
-  const settled = trip.expenses.filter(
-    (e) => isActiveExpense(e) && isSettledExpense(e),
-  );
+  const settled = trip.expenses.filter((e) => isActiveExpense(e) && isSettledExpense(e));
   const deleted = trip.expenses.filter((e) => !isActiveExpense(e));
   const exportedAt = shanghaiStamp(new Date().toISOString());
 

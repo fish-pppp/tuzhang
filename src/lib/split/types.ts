@@ -15,11 +15,28 @@ export type ShareSnapshot = {
   cents: number | null;
 };
 
+export type CurrencyCode = "CNY" | "AUD" | "NZD" | "VND";
+
+/** Rate snapshot frozen onto a foreign-currency bill. Amounts in the ledger stay CNY. */
+export type ExpenseFx = {
+  /** CNY per 1 unit of the foreign currency, before the bank fee. */
+  midRate: string;
+  /** Fee ratio, e.g. "0.005" for 0.5%. */
+  feeRate: string;
+  /** midRate × (1 + feeRate). */
+  rate: string;
+  quotedAt: string;
+  /** True when this quote was the last successful cache, not a live fetch. */
+  cached: boolean;
+  cachedAt?: string | null;
+};
+
 export type ExpenseEditChange =
   | { field: "title"; before: string; after: string }
   | { field: "amountCents"; before: number; after: number }
   | { field: "payerId"; before: string; after: string }
-  | { field: "shares"; before: ShareSnapshot[]; after: ShareSnapshot[] };
+  | { field: "shares"; before: ShareSnapshot[]; after: ShareSnapshot[] }
+  | { field: "fx"; before: string; after: string };
 
 export type ExpenseEdit = {
   id: string;
@@ -38,7 +55,13 @@ export type ExpensePhoto = {
 export type Expense = {
   id: string;
   title: string;
+  /** CNY cents. Foreign bills store the converted amount here so splits stay in RMB. */
   amountCents: number;
+  /** Original currency. Omitted or CNY means the amount was entered in RMB. */
+  currency?: CurrencyCode;
+  /** Minor units of `currency` (cents, or whole dong for VND). */
+  originalMinor?: number;
+  fx?: ExpenseFx;
   payerId: string;
   participantIds: string[];
   /**

@@ -5,6 +5,13 @@ import { getSql } from "@/lib/db";
 import { memberBalance } from "./calc";
 import { normalizeDeleteReason } from "./delete-reason";
 import { diffExpenseEdits, parseExpenseChanges } from "./expense-edit";
+import { DEFAULT_FX_FEE_RATE, normalizeDecimal, parseFeePercent } from "./fx.mjs";
+import {
+  bookingFromDb,
+  expenseMoneyFromBooking,
+  resolveFxBooking,
+  type FxBookingInput,
+} from "./fx-api";
 import { homeGroupName } from "./home-group";
 import { assertCanRemoveMember } from "./member-rules";
 import { newId } from "./money";
@@ -39,6 +46,8 @@ export type GroupPayload = Trip & {
   createdBy: string;
   /** Soft-removed people — not in `members` / 结余, but history still shows their names. */
   formerMembers: Member[];
+  /** Bank FX fee ratio, e.g. "0.005" for 0.5%. */
+  fxFeeRate: string;
 };
 
 const nameSchema = z.string().trim().min(1).max(80);
@@ -52,6 +61,46 @@ const profileSchema = z.object({
   displayName: z.string().trim().min(1).max(40),
   avatarUrl: z.string().max(2000).nullable().optional(),
 });
+const expenseMoneySchema = {
+  currency: z.enum(["CNY", "AUD", "NZD", "VND"]).optional(),
+  originalMinor: z.number().int().positive().max(2_000_000_000).optional(),
+  fxMidRate: z.string().min(1).max(40).optional(),
+  fxQuotedAt: z.string().min(1).max(40).optional(),
+  fxCached: z.boolean().optional(),
+  fxFeeRate: z.string().min(1).max(20).optional(),
+};
+
+type ExpenseMoneyRow = {
+  amount_cents: number;
+  currency: string | null;
+  original_minor: number | null;
+  fx_mid_rate: string | null;
+  fx_fee_rate: string | null;
+  fx_rate: string | null;
+  fx_quoted_at: unknown;
+  fx_cached: boolean | null;
+  fx_cached_at: unknown;
+};
+
+function bookingInput(data: {
+  currency?: FxBookingInput["currency"];
+  amountCents: number;
+  originalMinor?: number;
+  fxMidRate?: string;
+  fxQuotedAt?: string;
+  fxCached?: boolean;
+  fxFeeRate?: string;
+}): FxBookingInput {
+  return {
+    currency: data.currency,
+    amountCents: data.amountCents,
+    originalMinor: data.originalMinor,
+    fxMidRate: data.fxMidRate,
+    fxQuotedAt: data.fxQuotedAt,
+    fxCached: data.fxCached,
+    fxFeeRate: data.fxFeeRate,
+  };
+}
 
 function inviteCode(): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -123,8 +172,10 @@ async function loadGroupTrip(
     name: string;
     invite_code: string;
     created_by: string;
+    fx_fee_rate: string;
   }>`
-    select id, name, invite_code, created_by from groups where id = ${groupId} limit 1
+    select id, name, invite_code, created_by, fx_fee_rate::text as fx_fee_rate
+    from groups where id = ${groupId} limit 1
   `;
   const group = groups[0];
   if (!group) return null;
@@ -155,21 +206,27 @@ async function loadGroupTrip(
     else members.push(person);
   }
 
-  const expenseRows = await sql<{
-    id: string;
-    title: string;
-    amount_cents: number;
-    payer_id: string;
-    created_by: string;
-    created_at: string;
-    deleted_at: string | null;
-    deleted_by: string | null;
-    delete_reason: string | null;
-    settlement_id: string | null;
-  }>`
+  const expenseRows = await sql<
+    ExpenseMoneyRow & {
+      id: string;
+      title: string;
+      payer_id: string;
+      created_by: string;
+      created_at: string;
+      deleted_at: string | null;
+      deleted_by: string | null;
+      delete_reason: string | null;
+      settlement_id: string | null;
+    }
+  >`
     select id, title, amount_cents, payer_id, created_by, created_at::text as created_at,
            deleted_at::text as deleted_at, deleted_by, delete_reason,
-           settlement_id
+           settlement_id,
+           currency, original_minor,
+           fx_mid_rate::text as fx_mid_rate,
+           fx_fee_rate::text as fx_fee_rate,
+           fx_rate::text as fx_rate,
+           fx_quoted_at, fx_cached, fx_cached_at
     from group_expenses
     where group_id = ${groupId}
     order by created_at desc
@@ -220,10 +277,12 @@ async function loadGroupTrip(
   const expenses: Expense[] = expenseRows.map((e) => {
     const packed = sharesByExpense.get(e.id);
     const photos = photosByExpense.get(e.id);
+    const money = expenseMoneyFromBooking(bookingFromDb(e));
     return {
       id: e.id,
       title: e.title,
       amountCents: Number(e.amount_cents),
+      ...money,
       payerId: e.payer_id,
       participantIds: packed?.ids ?? [],
       ...(packed && packed.custom.length === packed.ids.length && packed.custom.length > 0
@@ -310,6 +369,7 @@ async function loadGroupTrip(
     name: group.name,
     inviteCode: group.invite_code,
     createdBy: group.created_by,
+    fxFeeRate: normalizeDecimal(group.fx_fee_rate, { allowZero: true }) ?? DEFAULT_FX_FEE_RATE,
     members,
     formerMembers,
     expenses,
@@ -546,6 +606,34 @@ export const renameGroup = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+export const updateGroupFxFee = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: unknown) =>
+    z
+      .object({
+        groupId: groupIdSchema,
+        /** Percent text such as "0.5", or a ratio such as "0.005". */
+        feePercent: z.string().trim().min(1).max(12),
+      })
+      .parse(data),
+  )
+  .handler(async ({ context, data }) => {
+    const feeRate = parseFeePercent(data.feePercent);
+    if (feeRate == null) throw new Error("手续费要在 0% 到 10% 之间，最多两位小数");
+    const sql = await getSql();
+    await requireMember(sql, data.groupId, context.userId);
+    const groups = await sql<{ created_by: string }>`
+      select created_by from groups where id = ${data.groupId} limit 1
+    `;
+    if (groups[0]?.created_by !== context.userId) {
+      throw new Error("只有群创建人可以改换汇手续费");
+    }
+    await sql`
+      update groups set fx_fee_rate = ${feeRate} where id = ${data.groupId}
+    `;
+    return { fxFeeRate: feeRate };
+  });
+
 export const updateMyName = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((data: unknown) =>
@@ -586,6 +674,7 @@ export const addGroupExpense = createServerFn({ method: "POST" })
           )
           .optional(),
         photoIds: z.array(z.string().min(8).max(80)).max(MAX_EXPENSE_PHOTOS).optional(),
+        ...expenseMoneySchema,
       })
       .parse(data),
   )
@@ -600,15 +689,29 @@ export const addGroupExpense = createServerFn({ method: "POST" })
     if (!allowed.has(data.payerId)) throw new Error("付款人不在群组里");
     const participants = [...new Set(data.participantIds)].filter((id) => allowed.has(id));
     if (participants.length === 0) throw new Error("至少选择一位一起分摊的人");
+    const feeRows = await sql<{ fx_fee_rate: string }>`
+      select fx_fee_rate::text as fx_fee_rate from groups where id = ${data.groupId} limit 1
+    `;
+    const groupFee =
+      normalizeDecimal(feeRows[0]?.fx_fee_rate, { allowZero: true }) ?? DEFAULT_FX_FEE_RATE;
+    const booked = await resolveFxBooking(sql, groupFee, bookingInput(data));
     const shares = normalizeExpenseShares({
       participantIds: participants,
-      amountCents: data.amountCents,
+      amountCents: booked.amountCents,
       shares: data.shares,
     });
     const id = newId();
     await sql`
-      insert into group_expenses (id, group_id, title, amount_cents, payer_id, created_by)
-      values (${id}, ${data.groupId}, ${data.title}, ${data.amountCents}, ${data.payerId}, ${context.userId})
+      insert into group_expenses (
+        id, group_id, title, amount_cents, payer_id, created_by,
+        currency, original_minor, fx_mid_rate, fx_fee_rate, fx_rate,
+        fx_quoted_at, fx_cached, fx_cached_at
+      )
+      values (
+        ${id}, ${data.groupId}, ${data.title}, ${booked.amountCents}, ${data.payerId}, ${context.userId},
+        ${booked.currency}, ${booked.originalMinor}, ${booked.fxMidRate}, ${booked.fxFeeRate}, ${booked.fxRate},
+        ${booked.fxQuotedAt}, ${booked.fxCached}, ${booked.fxCachedAt}
+      )
     `;
     try {
       if (shares) {
@@ -674,23 +777,30 @@ export const updateGroupExpense = createServerFn({ method: "POST" })
             }),
           )
           .optional(),
+        ...expenseMoneySchema,
       })
       .parse(data),
   )
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await requireMember(sql, data.groupId, context.userId);
-    const rows = await sql<{
-      id: string;
-      title: string;
-      amount_cents: number;
-      payer_id: string;
-      created_by: string;
-      deleted_at: string | null;
-      settlement_id: string | null;
-    }>`
+    const rows = await sql<
+      ExpenseMoneyRow & {
+        id: string;
+        title: string;
+        payer_id: string;
+        created_by: string;
+        deleted_at: string | null;
+        settlement_id: string | null;
+      }
+    >`
       select id, title, amount_cents, payer_id, created_by,
-             deleted_at::text as deleted_at, settlement_id
+             deleted_at::text as deleted_at, settlement_id,
+             currency, original_minor,
+             fx_mid_rate::text as fx_mid_rate,
+             fx_fee_rate::text as fx_fee_rate,
+             fx_rate::text as fx_rate,
+             fx_quoted_at, fx_cached, fx_cached_at
       from group_expenses
       where id = ${data.expenseId} and group_id = ${data.groupId}
       limit 1
@@ -711,9 +821,16 @@ export const updateGroupExpense = createServerFn({ method: "POST" })
     if (!allowed.has(data.payerId)) throw new Error("付款人不在群组里");
     const participants = [...new Set(data.participantIds)].filter((id) => allowed.has(id));
     if (participants.length === 0) throw new Error("至少选择一位一起分摊的人");
+    const feeRows = await sql<{ fx_fee_rate: string }>`
+      select fx_fee_rate::text as fx_fee_rate from groups where id = ${data.groupId} limit 1
+    `;
+    const groupFee =
+      normalizeDecimal(feeRows[0]?.fx_fee_rate, { allowZero: true }) ?? DEFAULT_FX_FEE_RATE;
+    const previous = bookingFromDb(current);
+    const booked = await resolveFxBooking(sql, groupFee, bookingInput(data), previous);
     const shares = normalizeExpenseShares({
       participantIds: participants,
-      amountCents: data.amountCents,
+      amountCents: booked.amountCents,
       shares: data.shares,
     });
 
@@ -731,20 +848,24 @@ export const updateGroupExpense = createServerFn({ method: "POST" })
             cents: Number(row.amount_cents),
           }))
         : undefined;
+    const beforeMoney = expenseMoneyFromBooking(previous);
+    const afterMoney = expenseMoneyFromBooking(booked);
     const changes = diffExpenseEdits(
       {
         title: current.title,
-        amountCents: Number(current.amount_cents),
+        amountCents: previous.amountCents,
         payerId: current.payer_id,
         participantIds: beforeIds,
         shares: beforeShares,
+        ...beforeMoney,
       },
       {
         title: data.title,
-        amountCents: data.amountCents,
+        amountCents: booked.amountCents,
         payerId: data.payerId,
         participantIds: participants,
         shares,
+        ...afterMoney,
       },
     );
     if (changes.length === 0) return { ok: true as const, changed: false as const };
@@ -753,8 +874,16 @@ export const updateGroupExpense = createServerFn({ method: "POST" })
     const updated = await sql<{ id: string }>`
       update group_expenses
       set title = ${data.title},
-          amount_cents = ${data.amountCents},
-          payer_id = ${data.payerId}
+          amount_cents = ${booked.amountCents},
+          payer_id = ${data.payerId},
+          currency = ${booked.currency},
+          original_minor = ${booked.originalMinor},
+          fx_mid_rate = ${booked.fxMidRate},
+          fx_fee_rate = ${booked.fxFeeRate},
+          fx_rate = ${booked.fxRate},
+          fx_quoted_at = ${booked.fxQuotedAt},
+          fx_cached = ${booked.fxCached},
+          fx_cached_at = ${booked.fxCachedAt}
       where id = ${data.expenseId}
         and group_id = ${data.groupId}
         and created_by = ${context.userId}
@@ -782,8 +911,16 @@ export const updateGroupExpense = createServerFn({ method: "POST" })
       await sql`
         update group_expenses
         set title = ${current.title},
-            amount_cents = ${current.amount_cents},
-            payer_id = ${current.payer_id}
+            amount_cents = ${previous.amountCents},
+            payer_id = ${current.payer_id},
+            currency = ${previous.currency},
+            original_minor = ${previous.originalMinor},
+            fx_mid_rate = ${previous.fxMidRate},
+            fx_fee_rate = ${previous.fxFeeRate},
+            fx_rate = ${previous.fxRate},
+            fx_quoted_at = ${previous.fxQuotedAt},
+            fx_cached = ${previous.fxCached},
+            fx_cached_at = ${previous.fxCachedAt}
         where id = ${data.expenseId}
       `.catch(() => undefined);
       await replaceExpenseShares(sql, data.expenseId, beforeIds, beforeShares).catch(
