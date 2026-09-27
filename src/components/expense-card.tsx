@@ -1,5 +1,4 @@
 import { Image } from "lucide-react";
-import { FxFacts } from "@/components/fx-facts";
 import { MemberAvatar } from "@/components/member-avatar";
 import { expenseInvolves } from "@/lib/split/calc";
 import { groupByDay } from "@/lib/split/date";
@@ -36,14 +35,6 @@ export function ExpenseCard({
   const amountLabel = foreign
     ? formatCurrencyAmount(expense.currency ?? "CNY", expense.originalMinor ?? 0)
     : formatMoney(expense.amountCents);
-  const facts =
-    foreign && expense.fx ? (
-      <FxFacts
-        currency={expense.currency ?? "CNY"}
-        amountCents={expense.amountCents}
-        fx={expense.fx}
-      />
-    ) : null;
 
   return (
     <button
@@ -56,7 +47,6 @@ export function ExpenseCard({
         <p className="min-w-0 truncate font-medium">{expense.title}</p>
         <p className="shrink-0 font-display text-base font-semibold tabular-nums">{amountLabel}</p>
       </div>
-      {facts ? <div className="border-t border-chip pt-1.5">{facts}</div> : null}
       <div className="flex items-center gap-2">
         <CardPeople expense={expense} membersById={membersById} />
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
