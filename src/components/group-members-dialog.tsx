@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DEFAULT_FX_FEE_RATE, formatFeePercent, parseFeePercent } from "@/lib/split/fx.mjs";
 import type { Member } from "@/lib/split/types";
 
 export function GroupMembersDialog({
@@ -24,6 +25,8 @@ export function GroupMembersDialog({
   onUpdateMyName,
   onLeave,
   onRemoveMember,
+  fxFeeRate = DEFAULT_FX_FEE_RATE,
+  onUpdateFxFee,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -34,6 +37,9 @@ export function GroupMembersDialog({
   onUpdateMyName?: (name: string) => void | Promise<void>;
   onLeave?: () => void;
   onRemoveMember?: (userId: string) => void | Promise<void>;
+  /** Fee ratio, e.g. "0.005". */
+  fxFeeRate?: string;
+  onUpdateFxFee?: (feePercent: string) => void | Promise<void>;
 }) {
   const me = members.find((m) => m.id === meId);
   const [name, setName] = useState(me?.name ?? "");
@@ -44,14 +50,15 @@ export function GroupMembersDialog({
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const [feePercent, setFeePercent] = useState(formatFeePercent(fxFeeRate) ?? "0.5");
+  const [feeSaving, setFeeSaving] = useState(false);
+  const [feeError, setFeeError] = useState<string | null>(null);
   const isOwner = Boolean(meId && createdBy && meId === createdBy);
 
   async function copyInvite() {
     if (!inviteCode) return;
     const url =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/join/${inviteCode}`
-        : inviteCode;
+      typeof window !== "undefined" ? `${window.location.origin}/join/${inviteCode}` : inviteCode;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -84,6 +91,8 @@ export function GroupMembersDialog({
           setName(me?.name ?? "");
         } else {
           setName(me?.name ?? "");
+          setFeePercent(formatFeePercent(fxFeeRate) ?? "0.5");
+          setFeeError(null);
         }
         onOpenChange(next);
       }}
@@ -141,12 +150,65 @@ export function GroupMembersDialog({
             </form>
           ) : null}
 
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!isOwner || !onUpdateFxFee) return;
+              const rate = parseFeePercent(feePercent);
+              if (rate == null) {
+                setFeeError("手续费要在 0% 到 10% 之间，最多两位小数");
+                return;
+              }
+              setFeeSaving(true);
+              setFeeError(null);
+              void Promise.resolve(onUpdateFxFee(feePercent))
+                .then(() => setFeePercent(formatFeePercent(rate) ?? feePercent))
+                .catch((err: unknown) => {
+                  setFeeError(err instanceof Error ? err.message : "手续费保存失败");
+                })
+                .finally(() => setFeeSaving(false));
+            }}
+            className="space-y-2"
+          >
+            <Label htmlFor="fx-fee">银行换汇手续费</Label>
+            {isOwner && onUpdateFxFee ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  id="fx-fee"
+                  inputMode="decimal"
+                  value={feePercent}
+                  onChange={(e) => {
+                    setFeePercent(e.target.value);
+                    setFeeError(null);
+                  }}
+                  className="w-24 tabular-nums"
+                />
+                <span className="text-sm text-muted">%</span>
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  disabled={feeSaving || parseFeePercent(feePercent) === fxFeeRate}
+                >
+                  {feeSaving ? "保存中…" : "保存"}
+                </Button>
+              </div>
+            ) : (
+              <p id="fx-fee" className="text-sm tabular-nums">
+                {formatFeePercent(fxFeeRate) ?? fxFeeRate}%
+              </p>
+            )}
+            <p className="text-xs text-muted">
+              默认 0.5%。外币按实时中间价 ×（1 + 手续费）折成人民币。已记的账单不会改。
+              {isOwner ? "" : "只有群创建人可以改。"}
+            </p>
+            {feeError ? <p className="text-sm text-owe">{feeError}</p> : null}
+          </form>
+
           {removeError ? <p className="text-sm text-owe">{removeError}</p> : null}
 
           <ul className="space-y-2">
             {members.map((m) => {
-              const canRemove =
-                Boolean(onRemoveMember) && isOwner && m.id !== meId;
+              const canRemove = Boolean(onRemoveMember) && isOwner && m.id !== meId;
               return (
                 <li
                   key={m.id}
@@ -160,9 +222,7 @@ export function GroupMembersDialog({
                         <span className="ml-1 font-normal text-muted">我</span>
                       ) : null}
                     </p>
-                    {m.id === createdBy ? (
-                      <p className="text-xs text-subtle">创建者</p>
-                    ) : null}
+                    {m.id === createdBy ? <p className="text-xs text-subtle">创建者</p> : null}
                     {confirmRemoveId === m.id ? (
                       <p className="mt-1 text-xs text-muted">
                         移出后不能再看这个群或记账。历史账单会保留，结余不再计算此人。
@@ -195,11 +255,7 @@ export function GroupMembersDialog({
                                 await onRemoveMember(m.id);
                                 setConfirmRemoveId(null);
                               } catch (err) {
-                                setRemoveError(
-                                  err instanceof Error
-                                    ? err.message
-                                    : "移出失败",
-                                );
+                                setRemoveError(err instanceof Error ? err.message : "移出失败");
                               } finally {
                                 setRemoving(false);
                               }

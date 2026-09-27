@@ -1,4 +1,5 @@
 import { ExpenseEditHistory } from "@/components/expense-edit-history";
+import { FxFacts } from "@/components/fx-facts";
 import { ExpensePhotoStrip } from "@/components/expense-photos";
 import { MemberAvatar } from "@/components/member-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { expenseInvolves, shareBreakdown, shareForMember } from "@/lib/split/calc";
 import { formatStamp } from "@/lib/split/date";
+import { formatCurrencyAmount, isForeignCurrency } from "@/lib/split/fx.mjs";
 import { formatMoney } from "@/lib/split/money";
 import {
   isOpenExpense,
@@ -51,6 +53,12 @@ export function ExpenseDetailDialog({
       : 0;
   const canDelete = Boolean(expense && onDelete && isOpenExpense(expense));
   const creatorName = expense?.createdBy ? (membersById[expense.createdBy]?.name ?? "未知") : null;
+  const foreign = Boolean(
+    expense &&
+    isForeignCurrency(expense.currency ?? "CNY") &&
+    expense.originalMinor != null &&
+    expense.fx,
+  );
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -66,14 +74,37 @@ export function ExpenseDetailDialog({
               </DialogDescription>
             </DialogHeader>
             <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
-              <div className="grid grid-cols-2 gap-2">
-                <AmountBox label="总价" value={formatMoney(expense.amountCents)} />
-                {mine ? (
-                  <AmountBox label="我要付" value={formatMoney(myShare)} tone="owe" />
-                ) : (
-                  <AmountBox label="付款人" value={payer?.name ?? "未知"} />
-                )}
-              </div>
+              {foreign ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <AmountBox
+                    label="原币"
+                    value={formatCurrencyAmount(
+                      expense.currency ?? "CNY",
+                      expense.originalMinor ?? 0,
+                    )}
+                  />
+                  <AmountBox label="折合人民币" value={formatMoney(expense.amountCents)} />
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <AmountBox label="总价" value={formatMoney(expense.amountCents)} />
+                  {mine ? (
+                    <AmountBox label="我要付" value={formatMoney(myShare)} tone="owe" />
+                  ) : (
+                    <AmountBox label="付款人" value={payer?.name ?? "未知"} />
+                  )}
+                </div>
+              )}
+              {foreign && mine ? (
+                <p className="text-sm tabular-nums text-owe">我要付 {formatMoney(myShare)}</p>
+              ) : null}
+              {foreign && expense.fx ? (
+                <FxFacts
+                  currency={expense.currency ?? "CNY"}
+                  amountCents={expense.amountCents}
+                  fx={expense.fx}
+                />
+              ) : null}
 
               {expense.payerId === meId && othersOwe > 0 ? (
                 <p className="text-sm tabular-nums text-receive">

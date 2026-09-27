@@ -1,3 +1,4 @@
+import { formatFxSnapshot, isForeignCurrency } from "./fx.mjs";
 import { formatMoney } from "./money";
 import type { Expense, ExpenseEditChange, ExpenseShare, ShareSnapshot } from "./types";
 
@@ -32,6 +33,9 @@ export function diffExpenseEdits(
     payerId: string;
     participantIds: string[];
     shares?: ExpenseShare[] | null;
+    currency?: Expense["currency"];
+    originalMinor?: number | null;
+    fx?: Expense["fx"];
   },
   after: {
     title: string;
@@ -39,6 +43,9 @@ export function diffExpenseEdits(
     payerId: string;
     participantIds: string[];
     shares?: ExpenseShare[] | null;
+    currency?: Expense["currency"];
+    originalMinor?: number | null;
+    fx?: Expense["fx"];
   },
 ): ExpenseEditChange[] {
   const changes: ExpenseEditChange[] = [];
@@ -60,7 +67,22 @@ export function diffExpenseEdits(
   if (!sameShares(beforeShares, afterShares)) {
     changes.push({ field: "shares", before: beforeShares, after: afterShares });
   }
+  const beforeFx = fxEditLabel(before);
+  const afterFx = fxEditLabel(after);
+  if (beforeFx !== afterFx) {
+    changes.push({ field: "fx", before: beforeFx, after: afterFx });
+  }
   return changes;
+}
+
+function fxEditLabel(expense: {
+  currency?: Expense["currency"];
+  originalMinor?: number | null;
+  amountCents: number;
+  fx?: Expense["fx"];
+}): string {
+  if (!isForeignCurrency(expense.currency ?? "CNY")) return "人民币";
+  return formatFxSnapshot(expense);
 }
 
 /** Only the bill's creator may change an open (not deleted, not settled) bill. */
@@ -92,6 +114,7 @@ const FIELD_LABEL: Record<ExpenseEditChange["field"], string> = {
   amountCents: "金额",
   payerId: "付款人",
   shares: "分摊",
+  fx: "汇率",
 };
 
 export function formatExpenseChange(
@@ -114,6 +137,9 @@ export function formatExpenseChange(
       before: nameOf(change.before),
       after: nameOf(change.after),
     };
+  }
+  if (change.field === "fx") {
+    return { label: FIELD_LABEL.fx, before: change.before, after: change.after };
   }
   return {
     label: FIELD_LABEL.shares,
@@ -168,6 +194,10 @@ export function parseExpenseChanges(raw: unknown): ExpenseEditChange[] {
       row.after.every(isShareSnapshot)
     ) {
       changes.push({ field: "shares", before: row.before, after: row.after });
+      continue;
+    }
+    if (row.field === "fx" && typeof row.before === "string" && typeof row.after === "string") {
+      changes.push({ field: "fx", before: row.before, after: row.after });
     }
   }
   return changes;

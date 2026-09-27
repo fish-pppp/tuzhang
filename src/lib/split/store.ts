@@ -64,6 +64,9 @@ export const useTripStore = create<TripState>()(
                 {
                   title: input.title,
                   amountCents: input.amountCents,
+                  currency: input.currency,
+                  originalMinor: input.originalMinor,
+                  fx: input.fx,
                   payerId: input.payerId,
                   participantIds: [...new Set(input.participantIds)],
                   ...(shares ? { shares } : {}),
@@ -92,6 +95,9 @@ export const useTripStore = create<TripState>()(
             payerId: input.payerId,
             participantIds: [...new Set(input.participantIds)],
             shares,
+            currency: input.currency,
+            originalMinor: input.originalMinor,
+            fx: input.fx,
           };
           const changes = diffExpenseEdits(current, next);
           if (changes.length === 0) return s;
@@ -111,6 +117,9 @@ export const useTripStore = create<TripState>()(
                   ...expense,
                   title: next.title,
                   amountCents: next.amountCents,
+                  currency: input.currency ?? "CNY",
+                  originalMinor: input.originalMinor,
+                  fx: input.fx,
                   payerId: next.payerId,
                   participantIds: next.participantIds,
                   ...(shares ? { shares } : { shares: undefined }),

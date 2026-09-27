@@ -62,6 +62,8 @@ export type TripViewProps = {
   onLeave?: () => void;
   onUpdateMyName?: (name: string) => void | Promise<void>;
   onRemoveMember?: (userId: string) => void | Promise<void>;
+  fxFeeRate?: string;
+  onUpdateFxFee?: (feePercent: string) => void | Promise<void>;
 };
 
 type BoardTab = "mine" | "all" | "settle";
@@ -84,6 +86,8 @@ export function TripView({
   onLeave,
   onUpdateMyName,
   onRemoveMember,
+  fxFeeRate,
+  onUpdateFxFee,
 }: TripViewProps) {
   const [tab, setTab] = useState<BoardTab>("mine");
   const [expenseOpen, setExpenseOpen] = useState(false);
@@ -286,6 +290,7 @@ export function TripView({
         onAdd={onAddExpense}
         onUploadPhoto={onUploadExpensePhoto}
         onDiscardPhotos={onDiscardExpensePhotos}
+        fxFeeRate={fxFeeRate}
       />
       <AddExpenseDialog
         open={Boolean(editing)}
@@ -295,6 +300,7 @@ export function TripView({
         trip={trip}
         defaultPayerId={editing?.payerId ?? meId}
         initialExpense={editing}
+        fxFeeRate={fxFeeRate}
         onAdd={async (input) => {
           if (!editing || !onUpdateExpense) return;
           const id = editing.id;
@@ -346,6 +352,8 @@ export function TripView({
           onUpdateMyName={onUpdateMyName}
           onLeave={onLeave}
           onRemoveMember={onRemoveMember}
+          fxFeeRate={fxFeeRate}
+          onUpdateFxFee={onUpdateFxFee}
         />
       )}
     </div>

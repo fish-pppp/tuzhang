@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check } from "lucide-react";
+import { FxFacts } from "@/components/fx-facts";
 import { ExpensePhotoPicker } from "@/components/expense-photos";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +13,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MemberAvatar } from "@/components/member-avatar";
+import { formatStamp } from "@/lib/split/date";
+import { getFxQuote } from "@/lib/split/fx-api";
+import {
+  DEFAULT_FX_FEE_RATE,
+  actualFxRate,
+  currencyLabel,
+  currencySymbol,
+  isForeignCurrency,
+  parseCurrencyAmount,
+  toCnyCents,
+  type CurrencyCode,
+} from "@/lib/split/fx.mjs";
 import { formatMoney, newId, parseYuan } from "@/lib/split/money";
 import {
   compressExpensePhoto,
@@ -23,6 +36,16 @@ import type { Expense, ExpensePhoto, ExpenseShare, Trip } from "@/lib/split/type
 import { cn } from "@/lib/utils";
 
 type SplitMode = "equal" | "custom";
+type CurrencyOption = CurrencyCode;
+
+const CURRENCY_OPTIONS: CurrencyOption[] = ["CNY", "AUD", "NZD", "VND"];
+
+type ShownQuote = {
+  midRate: string;
+  quotedAt: string;
+  cached: boolean;
+  cachedAt: string | null;
+};
 
 export function AddExpenseDialog({
   open,
@@ -33,6 +56,7 @@ export function AddExpenseDialog({
   onUploadPhoto,
   onDiscardPhotos,
   initialExpense,
+  fxFeeRate = DEFAULT_FX_FEE_RATE,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,10 +72,19 @@ export function AddExpenseDialog({
   onDiscardPhotos?: (ids: string[]) => void | Promise<void>;
   /** Set to edit an existing bill instead of creating one. Photos stay as they are. */
   initialExpense?: Expense | null;
+  /** Group bank fee ratio. Defaults to 0.5%. */
+  fxFeeRate?: string;
 }) {
   const fallbackPayer = defaultPayerId ?? trip.members[0]?.id ?? "";
   const [title, setTitle] = useState("");
+  const [currency, setCurrency] = useState<CurrencyOption>("CNY");
   const [amount, setAmount] = useState("");
+  const [liveQuote, setLiveQuote] = useState<ShownQuote | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteCache, setQuoteCache] = useState<ShownQuote | null>(null);
+  const [acceptCache, setAcceptCache] = useState(false);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const splitBasis = useRef<number | null>(null);
   const [payerId, setPayerId] = useState(fallbackPayer);
   const [participantIds, setParticipantIds] = useState<string[]>(trip.members.map((m) => m.id));
   const [splitMode, setSplitMode] = useState<SplitMode>("equal");
@@ -66,8 +99,8 @@ export function AddExpenseDialog({
   const editing = Boolean(initialExpense);
   photosRef.current = photos;
 
-  function fillEqualCustom(ids: string[], yuan: string) {
-    const cents = parseYuan(yuan);
+  function fillEqualCustom(ids: string[], cents: number | null) {
+    splitBasis.current = cents;
     if (!cents || ids.length === 0) {
       setCustomYuan(Object.fromEntries(ids.map((id) => [id, ""])));
       return;
@@ -77,6 +110,16 @@ export function AddExpenseDialog({
       next[share.memberId] = (share.cents / 100).toFixed(2);
     }
     setCustomYuan(next);
+  }
+
+  function amountText(expense: Expense): string {
+    const code = expense.currency ?? "CNY";
+    if (isForeignCurrency(code) && expense.originalMinor != null) {
+      return code === "VND"
+        ? String(expense.originalMinor)
+        : (expense.originalMinor / 100).toFixed(2);
+    }
+    return (expense.amountCents / 100).toFixed(2);
   }
 
   useEffect(() => {
@@ -91,11 +134,21 @@ export function AddExpenseDialog({
     setPending(false);
     setPhotoBusy(false);
     setPhotos([]);
+    setLiveQuote(null);
+    setQuoteError(null);
+    setQuoteCache(null);
+    setAcceptCache(false);
+    setQuoteLoading(false);
     if (initialExpense) {
       const memberIds = new Set(trip.members.map((member) => member.id));
       const ids = initialExpense.participantIds.filter((id) => memberIds.has(id));
       setTitle(initialExpense.title);
-      setAmount((initialExpense.amountCents / 100).toFixed(2));
+      setCurrency(initialExpense.currency ?? "CNY");
+      setAmount(amountText(initialExpense));
+      splitBasis.current =
+        initialExpense.shares && initialExpense.shares.length > 0
+          ? initialExpense.amountCents
+          : null;
       setPayerId(
         memberIds.has(initialExpense.payerId)
           ? initialExpense.payerId
@@ -119,13 +172,125 @@ export function AddExpenseDialog({
     setPayerId(defaultPayerId ?? trip.members[0]?.id ?? "");
     setParticipantIds(ids);
     setTitle("");
+    setCurrency("CNY");
     setAmount("");
+    splitBasis.current = null;
     setSplitMode("equal");
     setCustomYuan({});
   }, [open, defaultPayerId, initialExpense, trip.members]);
 
+  const originalMinor = parseCurrencyAmount(amount, currency);
+  const initialCurrency = initialExpense?.currency ?? "CNY";
+  const reuseStored = Boolean(
+    editing &&
+    initialExpense &&
+    currency === initialCurrency &&
+    originalMinor != null &&
+    (currency === "CNY"
+      ? originalMinor === initialExpense.amountCents
+      : originalMinor === initialExpense.originalMinor && initialExpense.fx),
+  );
+  const storedQuote: ShownQuote | null =
+    reuseStored && initialExpense?.fx
+      ? {
+          midRate: initialExpense.fx.midRate,
+          quotedAt: initialExpense.fx.quotedAt,
+          cached: initialExpense.fx.cached,
+          cachedAt: initialExpense.fx.cachedAt ?? null,
+        }
+      : null;
+  const activeQuote: ShownQuote | null = storedQuote
+    ? storedQuote
+    : acceptCache && quoteCache
+      ? { ...quoteCache, cached: true }
+      : liveQuote;
+  const shownFee = reuseStored && initialExpense?.fx ? initialExpense.fx.feeRate : fxFeeRate;
+  const shownRate =
+    reuseStored && initialExpense?.fx
+      ? initialExpense.fx.rate
+      : activeQuote
+        ? actualFxRate(activeQuote.midRate, shownFee)
+        : null;
+  const amountCents =
+    currency === "CNY"
+      ? originalMinor
+      : reuseStored && initialExpense
+        ? initialExpense.amountCents
+        : originalMinor != null && shownRate
+          ? toCnyCents(originalMinor, currency, shownRate)
+          : null;
+
+  useEffect(() => {
+    if (!open || currency === "CNY") return;
+    let cancelled = false;
+    setLiveQuote(null);
+    setQuoteError(null);
+    setQuoteCache(null);
+    setAcceptCache(false);
+    setQuoteLoading(true);
+    void getFxQuote({ data: { currency } })
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setLiveQuote({
+            midRate: result.midRate,
+            quotedAt: result.quotedAt,
+            cached: false,
+            cachedAt: null,
+          });
+          setQuoteError(null);
+          setQuoteCache(null);
+        } else {
+          setLiveQuote(null);
+          setQuoteError(result.error);
+          setQuoteCache(
+            result.cache
+              ? {
+                  midRate: result.cache.midRate,
+                  quotedAt: result.cache.quotedAt,
+                  cached: true,
+                  cachedAt: result.cache.cachedAt,
+                }
+              : null,
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLiveQuote(null);
+        setQuoteError(err instanceof Error ? err.message : "实时汇率获取失败");
+        setQuoteCache(null);
+      })
+      .finally(() => {
+        if (!cancelled) setQuoteLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, currency]);
+
+  useEffect(() => {
+    if (!open || splitMode !== "custom" || amountCents == null) return;
+    if (splitBasis.current === amountCents) return;
+    if (splitBasis.current != null) {
+      let total = 0;
+      let complete = true;
+      for (const id of participantIds) {
+        const cents = parseYuan(customYuan[id] ?? "", { allowZero: true });
+        if (cents == null) {
+          complete = false;
+          break;
+        }
+        total += cents;
+      }
+      if (!complete || total !== splitBasis.current) return;
+    }
+    fillEqualCustom(participantIds, amountCents);
+    // Refill only when the converted total changes, not on each custom keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, splitMode, amountCents]);
+
   const allSelected = participantIds.length === trip.members.length;
-  const amountCents = parseYuan(amount);
   const perHead = useMemo(() => {
     if (!amountCents || participantIds.length === 0) return null;
     return amountCents / participantIds.length;
@@ -147,7 +312,14 @@ export function AddExpenseDialog({
 
   function resetForm() {
     setTitle("");
+    setCurrency("CNY");
     setAmount("");
+    setLiveQuote(null);
+    setQuoteError(null);
+    setQuoteCache(null);
+    setAcceptCache(false);
+    setQuoteLoading(false);
+    splitBasis.current = null;
     setPayerId(defaultPayerId ?? trip.members[0]?.id ?? "");
     setParticipantIds(trip.members.map((m) => m.id));
     setSplitMode("equal");
@@ -207,16 +379,24 @@ export function AddExpenseDialog({
           ? prev
           : prev.filter((x) => x !== id)
         : [...prev, id];
-      if (splitMode === "custom") fillEqualCustom(next, amount);
+      if (splitMode === "custom") fillEqualCustom(next, amountCents);
       return next;
     });
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const cents = parseYuan(amount);
+    if (currency === "VND" && amount.trim() && originalMinor == null) {
+      setError("越南盾请填整数");
+      return;
+    }
+    if (isForeignCurrency(currency) && !activeQuote) {
+      setError(quoteError ?? "请先等实时汇率出来，或使用上次成功的缓存");
+      return;
+    }
+    const cents = amountCents;
     if (!cents) {
-      setError("请输入有效金额");
+      setError(currency === "VND" ? "越南盾请填整数" : "请输入有效金额");
       return;
     }
     if (!payerId) {
@@ -244,6 +424,20 @@ export function AddExpenseDialog({
       await onAdd({
         title: title.trim() || "未命名支出",
         amountCents: cents,
+        currency,
+        ...(isForeignCurrency(currency) && activeQuote && shownRate && originalMinor != null
+          ? {
+              originalMinor,
+              fx: {
+                midRate: activeQuote.midRate,
+                feeRate: shownFee,
+                rate: shownRate,
+                quotedAt: activeQuote.quotedAt,
+                cached: activeQuote.cached,
+                cachedAt: activeQuote.cachedAt,
+              },
+            }
+          : {}),
         payerId,
         participantIds,
         ...(shares ? { shares } : {}),
@@ -287,27 +481,64 @@ export function AddExpenseDialog({
         >
           <div className="space-y-2">
             <Label htmlFor="amount">金额</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {CURRENCY_OPTIONS.map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => {
+                    setCurrency(code);
+                    setError(null);
+                    setAcceptCache(false);
+                  }}
+                  className={cn(
+                    "h-8 rounded-full px-3 text-xs font-medium",
+                    currency === code ? "bg-primary text-primary-fg" : "bg-chip text-muted",
+                  )}
+                >
+                  {currencyLabel(code)}
+                </button>
+              ))}
+            </div>
             <div className="relative">
               <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 font-display text-xl text-muted">
-                ¥
+                {currencySymbol(currency)}
               </span>
               <Input
                 id="amount"
-                inputMode="decimal"
-                placeholder="0.00"
+                inputMode={currency === "VND" ? "numeric" : "decimal"}
+                placeholder={currency === "VND" ? "0" : "0.00"}
                 value={amount}
                 onChange={(e) => {
-                  const next = e.target.value;
-                  setAmount(next);
+                  setAmount(e.target.value);
                   setError(null);
-                  if (splitMode === "custom") fillEqualCustom(participantIds, next);
                 }}
-                className="h-14 pl-8 font-display text-2xl tabular-nums"
+                className={cn(
+                  "h-14 font-display text-2xl tabular-nums",
+                  currency === "NZD" ? "pl-14" : currency === "AUD" ? "pl-12" : "pl-8",
+                )}
                 autoFocus
               />
             </div>
+            {isForeignCurrency(currency) ? (
+              <FxPreview
+                currency={currency}
+                loading={quoteLoading && !storedQuote}
+                error={storedQuote ? null : quoteError}
+                cache={quoteCache}
+                quote={activeQuote}
+                feeRate={shownFee}
+                rate={shownRate}
+                amountCents={amountCents}
+                onUseCache={() => {
+                  setAcceptCache(true);
+                  setError(null);
+                }}
+              />
+            ) : null}
             {splitMode === "equal" && perHead != null && (
               <p className="text-xs text-muted tabular-nums">
+                {isForeignCurrency(currency) ? "按折合人民币，" : ""}
                 {participantIds.length} 人平摊，约 ¥{(perHead / 100).toFixed(2)} / 人
               </p>
             )}
@@ -358,7 +589,7 @@ export function AddExpenseDialog({
                     ? [payerId].filter(Boolean)
                     : trip.members.map((m) => m.id);
                   setParticipantIds(next);
-                  if (splitMode === "custom") fillEqualCustom(next, amount);
+                  if (splitMode === "custom") fillEqualCustom(next, amountCents);
                 }}
               >
                 {allSelected ? "只留付款人" : "全选"}
@@ -406,7 +637,7 @@ export function AddExpenseDialog({
                 active={splitMode === "custom"}
                 onClick={() => {
                   setSplitMode("custom");
-                  fillEqualCustom(participantIds, amount);
+                  fillEqualCustom(participantIds, amountCents);
                   setError(null);
                 }}
               >
@@ -454,7 +685,11 @@ export function AddExpenseDialog({
                         : `比总额少了 ${formatMoney(-customDiff)}`}
                   </p>
                 ) : (
-                  <p className="text-xs text-muted">每个人填自己那一份，加起来要等于总价。</p>
+                  <p className="text-xs text-muted">
+                    每个人填自己那一份
+                    {isForeignCurrency(currency) ? "（人民币）" : ""}
+                    ，加起来要等于总价。
+                  </p>
                 )}
               </ul>
             ) : null}
@@ -478,7 +713,7 @@ export function AddExpenseDialog({
           <Button
             type="submit"
             className="h-12 w-full rounded-lg text-base"
-            disabled={pending || photoBusy}
+            disabled={pending || photoBusy || (isForeignCurrency(currency) && !activeQuote)}
           >
             {pending
               ? editing
@@ -493,6 +728,57 @@ export function AddExpenseDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function FxPreview({
+  currency,
+  loading,
+  error,
+  cache,
+  quote,
+  feeRate,
+  rate,
+  amountCents,
+  onUseCache,
+}: {
+  currency: CurrencyOption;
+  loading: boolean;
+  error: string | null;
+  cache: ShownQuote | null;
+  quote: ShownQuote | null;
+  feeRate: string;
+  rate: string | null;
+  amountCents: number | null;
+  onUseCache: () => void;
+}) {
+  if (loading && !quote) {
+    return <p className="text-xs text-muted">正在获取实时汇率…</p>;
+  }
+  return (
+    <div className="space-y-1.5 rounded-xl bg-bg-elevated px-3 py-2.5">
+      {error ? <p className="text-xs text-owe">{error}</p> : null}
+      {error && cache && !quote?.cached ? (
+        <button type="button" className="text-xs font-medium text-primary" onClick={onUseCache}>
+          使用上次成功的缓存（取价时间 {formatStamp(cache.quotedAt) || cache.quotedAt}，缓存于{" "}
+          {formatStamp(cache.cachedAt) || "上次成功"}）
+        </button>
+      ) : null}
+      {quote && rate ? (
+        <FxFacts
+          currency={currency}
+          amountCents={amountCents}
+          fx={{
+            midRate: quote.midRate,
+            feeRate,
+            rate,
+            quotedAt: quote.quotedAt,
+            cached: quote.cached,
+            cachedAt: quote.cachedAt,
+          }}
+        />
+      ) : null}
+    </div>
   );
 }
 
