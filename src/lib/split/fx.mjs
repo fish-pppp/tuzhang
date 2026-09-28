@@ -119,23 +119,76 @@ export function parseFeePercent(raw) {
 
 /**
  * Minor units: cents for AUD/NZD/CNY, whole dong for VND.
- * Returns null when the text is empty, zero, or has the wrong precision.
+ * Returns null when the text is empty, negative, or has the wrong precision.
+ * Zero is rejected unless `allowZero` is set (custom shares may be 0).
  */
-export function parseCurrencyAmount(raw, currency) {
+export function parseCurrencyAmount(raw, currency, opts) {
+  const allowZero = Boolean(opts?.allowZero);
   let cleaned = String(raw ?? "").trim();
   if (!cleaned) return null;
   cleaned = cleaned.replace(/[¥￥₫,\s]/g, "").replace(/A\$|NZ\$/g, "");
   if (currency === "VND") {
     if (!/^\d+$/.test(cleaned)) return null;
     const n = Number(cleaned);
-    if (!Number.isSafeInteger(n) || n <= 0 || n > 2_000_000_000) return null;
+    if (!Number.isSafeInteger(n) || n < 0 || n > 2_000_000_000) return null;
+    if (n === 0 && !allowZero) return null;
     return n;
   }
   if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
   const [whole, frac = ""] = cleaned.split(".");
   const minor = Number(whole) * 100 + Number(frac.padEnd(2, "0"));
-  if (!Number.isSafeInteger(minor) || minor <= 0 || minor > 2_000_000_000) return null;
+  if (!Number.isSafeInteger(minor) || minor < 0 || minor > 2_000_000_000) return null;
+  if (minor === 0 && !allowZero) return null;
   return minor;
+}
+
+/** Plain input text for a minor amount. No grouping, no symbol. */
+export function formatCurrencyInput(currency, minor) {
+  if (!Number.isInteger(minor) || minor < 0) return "";
+  if (currencyDecimals(currency) === 0) return String(minor);
+  const whole = Math.floor(minor / 100);
+  const frac = String(minor % 100).padStart(2, "0");
+  return `${whole}.${frac}`;
+}
+
+/**
+ * Split `total` across `weights` with the largest-remainder method.
+ * The result is integers and sums to `total`. Ties go to the earlier index.
+ */
+export function allocateByWeights(total, weights) {
+  if (!Array.isArray(weights) || weights.length === 0) return [];
+  if (!Number.isInteger(total) || total < 0) return weights.map(() => 0);
+  if (weights.some((weight) => !Number.isInteger(weight) || weight < 0)) {
+    return weights.map(() => 0);
+  }
+  const weightSum = weights.reduce((sum, weight) => sum + weight, 0);
+  if (weightSum <= 0 || total === 0) return weights.map(() => 0);
+
+  const sumBig = BigInt(weightSum);
+  const totalBig = BigInt(total);
+  const base = [];
+  const remainder = [];
+  let assigned = 0n;
+  for (const weight of weights) {
+    const product = BigInt(weight) * totalBig;
+    const quote = product / sumBig;
+    base.push(quote);
+    remainder.push(product % sumBig);
+    assigned += quote;
+  }
+  let leftover = totalBig - assigned;
+  const order = remainder
+    .map((rem, index) => ({ index, rem }))
+    .sort((a, b) => {
+      if (a.rem === b.rem) return a.index - b.index;
+      return a.rem > b.rem ? -1 : 1;
+    });
+  for (const item of order) {
+    if (leftover <= 0n) break;
+    base[item.index] += 1n;
+    leftover -= 1n;
+  }
+  return base.map((part) => Number(part));
 }
 
 export function formatCurrencyAmount(currency, minor) {

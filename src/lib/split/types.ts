@@ -6,13 +6,22 @@ export type Member = {
 
 export type ExpenseShare = {
   memberId: string;
+  /** This person's share of the CNY ledger, in cents. */
   cents: number;
+  /**
+   * This person's share in minor units of the bill currency.
+   * Set for custom splits in AUD / NZD / VND. Omitted for RMB.
+   */
+  originalMinor?: number;
 };
 
 /** One person's split as stored on an edit. `cents: null` means equal AA. */
 export type ShareSnapshot = {
   memberId: string;
   cents: number | null;
+  /** Original-currency minor units, when this custom share was entered that way. */
+  originalMinor?: number | null;
+  currency?: CurrencyCode;
 };
 
 export type CurrencyCode = "CNY" | "AUD" | "NZD" | "VND";

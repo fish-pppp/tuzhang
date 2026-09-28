@@ -61,6 +61,11 @@ const profileSchema = z.object({
   displayName: z.string().trim().min(1).max(40),
   avatarUrl: z.string().max(2000).nullable().optional(),
 });
+const shareSchema = z.object({
+  memberId: z.string().min(1),
+  cents: z.number().int().nonnegative(),
+  originalMinor: z.number().int().nonnegative().max(2_000_000_000).optional(),
+});
 const expenseMoneySchema = {
   currency: z.enum(["CNY", "AUD", "NZD", "VND"]).optional(),
   originalMinor: z.number().int().positive().max(2_000_000_000).optional(),
@@ -123,20 +128,34 @@ function readEditChanges(value: unknown): unknown {
   }
 }
 
-async function replaceExpenseShares(
+function shareFromRow(row: {
+  user_id: string;
+  amount_cents: number | null;
+  original_minor?: number | null;
+}): ExpenseShare | null {
+  if (row.amount_cents == null) return null;
+  return {
+    memberId: row.user_id,
+    cents: Number(row.amount_cents),
+    ...(row.original_minor != null ? { originalMinor: Number(row.original_minor) } : {}),
+  };
+}
+
+async function insertExpenseShares(
   sql: Awaited<ReturnType<typeof getSql>>,
   expenseId: string,
   participantIds: string[],
   shares: ExpenseShare[] | undefined,
 ) {
-  await sql`delete from group_expense_shares where expense_id = ${expenseId}`;
   if (shares && shares.length > 0) {
     const shareIds = shares.map((share) => share.memberId);
     const shareCents = shares.map((share) => share.cents);
+    const shareOriginal = shares.map((share) => share.originalMinor ?? null);
     await sql`
-      insert into group_expense_shares (expense_id, user_id, amount_cents)
-      select ${expenseId}, t.user_id, t.cents
-      from unnest(${shareIds}::text[], ${shareCents}::int[]) as t(user_id, cents)
+      insert into group_expense_shares (expense_id, user_id, amount_cents, original_minor)
+      select ${expenseId}, t.user_id, t.cents, t.original_minor
+      from unnest(${shareIds}::text[], ${shareCents}::int[], ${shareOriginal}::int[])
+        as t(user_id, cents, original_minor)
     `;
     return;
   }
@@ -144,6 +163,16 @@ async function replaceExpenseShares(
     insert into group_expense_shares (expense_id, user_id)
     select ${expenseId}, unnest(${participantIds}::text[])
   `;
+}
+
+async function replaceExpenseShares(
+  sql: Awaited<ReturnType<typeof getSql>>,
+  expenseId: string,
+  participantIds: string[],
+  shares: ExpenseShare[] | undefined,
+) {
+  await sql`delete from group_expense_shares where expense_id = ${expenseId}`;
+  await insertExpenseShares(sql, expenseId, participantIds, shares);
 }
 
 async function requireMember(
@@ -235,8 +264,9 @@ async function loadGroupTrip(
     expense_id: string;
     user_id: string;
     amount_cents: number | null;
+    original_minor: number | null;
   }>`
-    select s.expense_id, s.user_id, s.amount_cents
+    select s.expense_id, s.user_id, s.amount_cents, s.original_minor
     from group_expense_shares s
     join group_expenses e on e.id = s.expense_id
     where e.group_id = ${groupId}
@@ -245,12 +275,8 @@ async function loadGroupTrip(
   for (const row of shareRows) {
     const list = sharesByExpense.get(row.expense_id) ?? { ids: [], custom: [] };
     list.ids.push(row.user_id);
-    if (row.amount_cents != null) {
-      list.custom.push({
-        memberId: row.user_id,
-        cents: Number(row.amount_cents),
-      });
-    }
+    const custom = shareFromRow(row);
+    if (custom) list.custom.push(custom);
     sharesByExpense.set(row.expense_id, list);
   }
   const photoRows = await sql<{
@@ -665,14 +691,7 @@ export const addGroupExpense = createServerFn({ method: "POST" })
         amountCents: z.number().int().positive(),
         payerId: z.string().min(1),
         participantIds: z.array(z.string().min(1)).min(1),
-        shares: z
-          .array(
-            z.object({
-              memberId: z.string().min(1),
-              cents: z.number().int().nonnegative(),
-            }),
-          )
-          .optional(),
+        shares: z.array(shareSchema).optional(),
         photoIds: z.array(z.string().min(8).max(80)).max(MAX_EXPENSE_PHOTOS).optional(),
         ...expenseMoneySchema,
       })
@@ -698,6 +717,8 @@ export const addGroupExpense = createServerFn({ method: "POST" })
     const shares = normalizeExpenseShares({
       participantIds: participants,
       amountCents: booked.amountCents,
+      currency: booked.currency,
+      originalMinor: booked.originalMinor,
       shares: data.shares,
     });
     const id = newId();
@@ -714,20 +735,7 @@ export const addGroupExpense = createServerFn({ method: "POST" })
       )
     `;
     try {
-      if (shares) {
-        const shareIds = shares.map((s) => s.memberId);
-        const shareCents = shares.map((s) => s.cents);
-        await sql`
-          insert into group_expense_shares (expense_id, user_id, amount_cents)
-          select ${id}, t.user_id, t.cents
-          from unnest(${shareIds}::text[], ${shareCents}::int[]) as t(user_id, cents)
-        `;
-      } else {
-        await sql`
-          insert into group_expense_shares (expense_id, user_id)
-          select ${id}, unnest(${participants}::text[])
-        `;
-      }
+      await insertExpenseShares(sql, id, participants, shares);
       const photoIds = [...new Set(data.photoIds ?? [])]
         .filter(isExpensePhotoId)
         .slice(0, MAX_EXPENSE_PHOTOS);
@@ -769,14 +777,7 @@ export const updateGroupExpense = createServerFn({ method: "POST" })
         amountCents: z.number().int().positive(),
         payerId: z.string().min(1),
         participantIds: z.array(z.string().min(1)).min(1),
-        shares: z
-          .array(
-            z.object({
-              memberId: z.string().min(1),
-              cents: z.number().int().nonnegative(),
-            }),
-          )
-          .optional(),
+        shares: z.array(shareSchema).optional(),
         ...expenseMoneySchema,
       })
       .parse(data),
@@ -831,23 +832,27 @@ export const updateGroupExpense = createServerFn({ method: "POST" })
     const shares = normalizeExpenseShares({
       participantIds: participants,
       amountCents: booked.amountCents,
+      currency: booked.currency,
+      originalMinor: booked.originalMinor,
       shares: data.shares,
     });
 
-    const shareRows = await sql<{ user_id: string; amount_cents: number | null }>`
-      select user_id, amount_cents
+    const shareRows = await sql<{
+      user_id: string;
+      amount_cents: number | null;
+      original_minor: number | null;
+    }>`
+      select user_id, amount_cents, original_minor
       from group_expense_shares
       where expense_id = ${data.expenseId}
     `;
     const beforeIds = shareRows.map((row) => row.user_id);
-    const customCount = shareRows.filter((row) => row.amount_cents != null).length;
+    const custom = shareRows.flatMap((row) => {
+      const share = shareFromRow(row);
+      return share ? [share] : [];
+    });
     const beforeShares =
-      shareRows.length > 0 && customCount === shareRows.length
-        ? shareRows.map((row) => ({
-            memberId: row.user_id,
-            cents: Number(row.amount_cents),
-          }))
-        : undefined;
+      shareRows.length > 0 && custom.length === shareRows.length ? custom : undefined;
     const beforeMoney = expenseMoneyFromBooking(previous);
     const afterMoney = expenseMoneyFromBooking(booked);
     const changes = diffExpenseEdits(
