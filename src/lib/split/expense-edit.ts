@@ -109,16 +109,31 @@ export function canEditExpense(
   return expense.createdBy === actorId;
 }
 
+/** Older payloads sometimes stored one object, a keyed map, or a ready-made label. */
+function asShareSnapshots(value: unknown): ShareSnapshot[] {
+  if (Array.isArray(value)) return value.filter(isShareSnapshot);
+  if (isShareSnapshot(value)) return [value];
+  if (value && typeof value === "object") {
+    return Object.values(value).filter(isShareSnapshot);
+  }
+  return [];
+}
+
 export function formatShareSnapshot(
-  shares: ShareSnapshot[],
+  shares: ShareSnapshot[] | unknown,
   nameOf: (id: string) => string,
 ): string {
-  if (shares.length === 0) return "无人分摊";
-  const equal = shares.every((share) => share.cents == null);
-  if (equal) {
-    return `${shares.map((share) => nameOf(share.memberId)).join("、")}（平均）`;
+  if (typeof shares === "string") {
+    const text = shares.trim();
+    return text || "无人分摊";
   }
-  return shares
+  const rows = asShareSnapshots(shares);
+  if (rows.length === 0) return "无人分摊";
+  const equal = rows.every((share) => share.cents == null);
+  if (equal) {
+    return `${rows.map((share) => nameOf(share.memberId)).join("、")}（平均）`;
+  }
+  return rows
     .map((share) => {
       const name = nameOf(share.memberId);
       const cny = formatMoney(share.cents ?? 0);
@@ -138,35 +153,74 @@ const FIELD_LABEL: Record<ExpenseEditChange["field"], string> = {
   fx: "汇率",
 };
 
+function changeText(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "—";
+}
+
 export function formatExpenseChange(
-  change: ExpenseEditChange,
+  change: ExpenseEditChange | { field?: unknown; before?: unknown; after?: unknown },
   nameOf: (id: string) => string,
 ): { label: string; before: string; after: string } {
-  if (change.field === "title") {
-    return { label: FIELD_LABEL.title, before: change.before, after: change.after };
-  }
-  if (change.field === "amountCents") {
+  const field = change.field;
+  if (field === "title") {
     return {
-      label: FIELD_LABEL.amountCents,
-      before: formatMoney(change.before),
-      after: formatMoney(change.after),
+      label: FIELD_LABEL.title,
+      before: changeText(change.before),
+      after: changeText(change.after),
     };
   }
-  if (change.field === "payerId") {
+  if (field === "amountCents") {
+    const before =
+      typeof change.before === "number" ? formatMoney(change.before) : changeText(change.before);
+    const after =
+      typeof change.after === "number" ? formatMoney(change.after) : changeText(change.after);
+    return { label: FIELD_LABEL.amountCents, before, after };
+  }
+  if (field === "payerId") {
     return {
       label: FIELD_LABEL.payerId,
-      before: nameOf(change.before),
-      after: nameOf(change.after),
+      before: typeof change.before === "string" ? nameOf(change.before) : changeText(change.before),
+      after: typeof change.after === "string" ? nameOf(change.after) : changeText(change.after),
     };
   }
-  if (change.field === "fx") {
-    return { label: FIELD_LABEL.fx, before: change.before, after: change.after };
+  if (field === "fx") {
+    return {
+      label: FIELD_LABEL.fx,
+      before: changeText(change.before),
+      after: changeText(change.after),
+    };
+  }
+  if (field === "shares") {
+    return {
+      label: FIELD_LABEL.shares,
+      before: formatShareSnapshot(change.before, nameOf),
+      after: formatShareSnapshot(change.after, nameOf),
+    };
   }
   return {
-    label: FIELD_LABEL.shares,
-    before: formatShareSnapshot(change.before, nameOf),
-    after: formatShareSnapshot(change.after, nameOf),
+    label:
+      typeof field === "string" && field in FIELD_LABEL
+        ? FIELD_LABEL[field as ExpenseEditChange["field"]]
+        : "改动",
+    before: changeText(change.before),
+    after: changeText(change.after),
   };
+}
+
+function asChangeItems(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      return asChangeItems(JSON.parse(raw) as unknown);
+    } catch {
+      return [];
+    }
+  }
+  if (raw && typeof raw === "object" && "field" in raw) return [raw];
+  return [];
 }
 
 function isShareSnapshot(value: unknown): value is ShareSnapshot {
@@ -204,7 +258,7 @@ function isShareSnapshot(value: unknown): value is ShareSnapshot {
 }
 
 export function parseExpenseChanges(raw: unknown): ExpenseEditChange[] {
-  const list = Array.isArray(raw) ? raw : [];
+  const list = asChangeItems(raw);
   const changes: ExpenseEditChange[] = [];
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
@@ -231,14 +285,19 @@ export function parseExpenseChanges(raw: unknown): ExpenseEditChange[] {
       changes.push({ field: "payerId", before: row.before, after: row.after });
       continue;
     }
-    if (
-      row.field === "shares" &&
-      Array.isArray(row.before) &&
-      Array.isArray(row.after) &&
-      row.before.every(isShareSnapshot) &&
-      row.after.every(isShareSnapshot)
-    ) {
-      changes.push({ field: "shares", before: row.before, after: row.after });
+    if (row.field === "shares") {
+      const before = asShareSnapshots(row.before);
+      const after = asShareSnapshots(row.after);
+      const hadShares =
+        Array.isArray(row.before) ||
+        Array.isArray(row.after) ||
+        isShareSnapshot(row.before) ||
+        isShareSnapshot(row.after) ||
+        before.length > 0 ||
+        after.length > 0;
+      if (hadShares) {
+        changes.push({ field: "shares", before, after });
+      }
       continue;
     }
     if (row.field === "fx" && typeof row.before === "string" && typeof row.after === "string") {

@@ -1,5 +1,5 @@
 import { formatStamp } from "@/lib/split/date";
-import { formatExpenseChange } from "@/lib/split/expense-edit";
+import { formatExpenseChange, parseExpenseChanges } from "@/lib/split/expense-edit";
 import type { Expense, ExpenseEdit, Member } from "@/lib/split/types";
 
 export function ExpenseEditHistory({
@@ -16,13 +16,14 @@ export function ExpenseEditHistory({
   empty?: string;
 }) {
   const nameOf = (id: string) => membersById[id]?.name ?? "未知";
-  if (edits.length === 0) {
+  const rows = Array.isArray(edits) ? edits : [];
+  if (rows.length === 0) {
     return <p className="text-sm text-muted">{empty}</p>;
   }
 
   return (
     <ul className="space-y-2">
-      {edits.map((edit) => {
+      {rows.map((edit) => {
         const expense = expensesById?.[edit.expenseId];
         const who = nameOf(edit.editedBy);
         const when = formatStamp(edit.editedAt) || "刚才";
@@ -30,10 +31,13 @@ export function ExpenseEditHistory({
           <>
             {expense ? <p className="truncate text-sm font-medium">{expense.title}</p> : null}
             <ul className={expense ? "mt-1 space-y-1" : "space-y-1"}>
-              {edit.changes.map((change) => {
+              {parseExpenseChanges(edit.changes).map((change, index) => {
                 const line = formatExpenseChange(change, nameOf);
                 return (
-                  <li key={`${edit.id}-${change.field}`} className="text-xs leading-5 text-muted">
+                  <li
+                    key={`${edit.id}-${String(change.field)}-${index}`}
+                    className="text-xs leading-5 text-muted"
+                  >
                     <span className="text-fg">{line.label}</span> {line.before}
                     <span className="text-subtle"> → </span>
                     {line.after}
