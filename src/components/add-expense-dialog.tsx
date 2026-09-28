@@ -18,20 +18,23 @@ import { getFxQuote } from "@/lib/split/fx-api";
 import {
   DEFAULT_FX_FEE_RATE,
   actualFxRate,
+  allocateByWeights,
   currencyLabel,
   currencySymbol,
+  formatCurrencyAmount,
+  formatCurrencyInput,
   isForeignCurrency,
   parseCurrencyAmount,
   toCnyCents,
   type CurrencyCode,
 } from "@/lib/split/fx.mjs";
-import { formatMoney, newId, parseYuan } from "@/lib/split/money";
+import { formatMoney, newId } from "@/lib/split/money";
 import {
   compressExpensePhoto,
   MAX_EXPENSE_PHOTOS,
   normalizeExpensePhotos,
 } from "@/lib/split/photo";
-import { equalShares, normalizeExpenseShares } from "@/lib/split/shares";
+import { customAmountInputs, normalizeExpenseShares, splitShares } from "@/lib/split/shares";
 import type { Expense, ExpensePhoto, ExpenseShare, Trip } from "@/lib/split/types";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +49,28 @@ type ShownQuote = {
   cached: boolean;
   cachedAt: string | null;
 };
+
+type SplitBasis = { currency: CurrencyOption; minor: number };
+
+type LoadedCustom = {
+  currency: CurrencyOption;
+  minor: number;
+  amountCents: number;
+  participantKey: string;
+  texts: Record<string, string>;
+  shares: ExpenseShare[];
+};
+
+function formatMinor(currency: string, minor: number): string {
+  return isForeignCurrency(currency) ? formatCurrencyAmount(currency, minor) : formatMoney(minor);
+}
+
+function currencyFieldClass(currency: string): { box: string; input: string } {
+  if (currency === "NZD") return { box: "w-36", input: "pl-12" };
+  if (currency === "AUD") return { box: "w-32", input: "pl-9" };
+  if (currency === "VND") return { box: "w-36", input: "pl-7" };
+  return { box: "w-28", input: "pl-6" };
+}
 
 export function AddExpenseDialog({
   open,
@@ -84,11 +109,12 @@ export function AddExpenseDialog({
   const [quoteCache, setQuoteCache] = useState<ShownQuote | null>(null);
   const [acceptCache, setAcceptCache] = useState(false);
   const [quoteLoading, setQuoteLoading] = useState(false);
-  const splitBasis = useRef<number | null>(null);
+  const splitBasis = useRef<SplitBasis | null>(null);
+  const loadedCustom = useRef<LoadedCustom | null>(null);
   const [payerId, setPayerId] = useState(fallbackPayer);
   const [participantIds, setParticipantIds] = useState<string[]>(trip.members.map((m) => m.id));
   const [splitMode, setSplitMode] = useState<SplitMode>("equal");
-  const [customYuan, setCustomYuan] = useState<Record<string, string>>({});
+  const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [photos, setPhotos] = useState<ExpensePhoto[]>([]);
@@ -99,17 +125,19 @@ export function AddExpenseDialog({
   const editing = Boolean(initialExpense);
   photosRef.current = photos;
 
-  function fillEqualCustom(ids: string[], cents: number | null) {
-    splitBasis.current = cents;
-    if (!cents || ids.length === 0) {
-      setCustomYuan(Object.fromEntries(ids.map((id) => [id, ""])));
+  function fillEqualCustom(ids: string[], minor: number | null) {
+    if (minor == null || ids.length === 0) {
+      splitBasis.current = null;
+      setCustomAmounts(Object.fromEntries(ids.map((id) => [id, ""])));
       return;
     }
+    splitBasis.current = { currency, minor };
+    const parts = splitShares(minor, ids.length);
     const next: Record<string, string> = {};
-    for (const share of equalShares(ids, cents)) {
-      next[share.memberId] = (share.cents / 100).toFixed(2);
-    }
-    setCustomYuan(next);
+    ids.forEach((id, index) => {
+      next[id] = formatCurrencyInput(currency, parts[index] ?? 0);
+    });
+    setCustomAmounts(next);
   }
 
   function amountText(expense: Expense): string {
@@ -145,26 +173,41 @@ export function AddExpenseDialog({
       setTitle(initialExpense.title);
       setCurrency(initialExpense.currency ?? "CNY");
       setAmount(amountText(initialExpense));
-      splitBasis.current =
-        initialExpense.shares && initialExpense.shares.length > 0
-          ? initialExpense.amountCents
-          : null;
       setPayerId(
         memberIds.has(initialExpense.payerId)
           ? initialExpense.payerId
           : (defaultPayerId ?? trip.members[0]?.id ?? ""),
       );
-      setParticipantIds(ids.length > 0 ? ids : trip.members.map((member) => member.id));
+      const activeIds = ids.length > 0 ? ids : trip.members.map((member) => member.id);
+      setParticipantIds(activeIds);
       if (initialExpense.shares && initialExpense.shares.length > 0) {
         setSplitMode("custom");
-        const next: Record<string, string> = {};
-        for (const share of initialExpense.shares) {
-          next[share.memberId] = (share.cents / 100).toFixed(2);
-        }
-        setCustomYuan(next);
+        const code = (initialExpense.currency ?? "CNY") as CurrencyOption;
+        const texts = customAmountInputs({ ...initialExpense, participantIds: activeIds });
+        setCustomAmounts(texts);
+        const minor = isForeignCurrency(code)
+          ? (initialExpense.originalMinor ?? null)
+          : initialExpense.amountCents;
+        splitBasis.current = minor == null ? null : { currency: code, minor };
+        const keptShares = initialExpense.shares.filter((share) =>
+          activeIds.includes(share.memberId),
+        );
+        loadedCustom.current =
+          minor == null
+            ? null
+            : {
+                currency: code,
+                minor,
+                amountCents: initialExpense.amountCents,
+                participantKey: [...activeIds].sort().join("\0"),
+                texts,
+                shares: keptShares,
+              };
       } else {
         setSplitMode("equal");
-        setCustomYuan({});
+        setCustomAmounts({});
+        splitBasis.current = null;
+        loadedCustom.current = null;
       }
       return;
     }
@@ -175,8 +218,9 @@ export function AddExpenseDialog({
     setCurrency("CNY");
     setAmount("");
     splitBasis.current = null;
+    loadedCustom.current = null;
     setSplitMode("equal");
-    setCustomYuan({});
+    setCustomAmounts({});
   }, [open, defaultPayerId, initialExpense, trip.members]);
 
   const originalMinor = parseCurrencyAmount(amount, currency);
@@ -270,25 +314,26 @@ export function AddExpenseDialog({
   }, [open, currency]);
 
   useEffect(() => {
-    if (!open || splitMode !== "custom" || amountCents == null) return;
-    if (splitBasis.current === amountCents) return;
-    if (splitBasis.current != null) {
+    if (!open || splitMode !== "custom" || originalMinor == null) return;
+    const basis = splitBasis.current;
+    if (basis && basis.currency === currency && basis.minor === originalMinor) return;
+    if (basis && basis.currency === currency) {
       let total = 0;
       let complete = true;
       for (const id of participantIds) {
-        const cents = parseYuan(customYuan[id] ?? "", { allowZero: true });
-        if (cents == null) {
+        const minor = parseCurrencyAmount(customAmounts[id] ?? "", currency, { allowZero: true });
+        if (minor == null) {
           complete = false;
           break;
         }
-        total += cents;
+        total += minor;
       }
-      if (!complete || total !== splitBasis.current) return;
+      if (!complete || total !== basis.minor) return;
     }
-    fillEqualCustom(participantIds, amountCents);
-    // Refill only when the converted total changes, not on each custom keystroke.
+    fillEqualCustom(participantIds, originalMinor);
+    // Refill when the bill currency or original total changes, not on each keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, splitMode, amountCents]);
+  }, [open, splitMode, currency, originalMinor]);
 
   const allSelected = participantIds.length === trip.members.length;
   const perHead = useMemo(() => {
@@ -298,17 +343,58 @@ export function AddExpenseDialog({
 
   const customShares = useMemo(() => {
     if (splitMode !== "custom") return null;
+    const foreign = isForeignCurrency(currency);
     const shares: ExpenseShare[] = [];
     for (const id of participantIds) {
-      const cents = parseYuan(customYuan[id] ?? "", { allowZero: true });
-      if (cents == null) return null;
-      shares.push({ memberId: id, cents });
+      const minor = parseCurrencyAmount(customAmounts[id] ?? "", currency, { allowZero: true });
+      if (minor == null) return null;
+      shares.push(
+        foreign ? { memberId: id, cents: 0, originalMinor: minor } : { memberId: id, cents: minor },
+      );
     }
     return shares;
-  }, [customYuan, participantIds, splitMode]);
+  }, [customAmounts, participantIds, splitMode, currency]);
 
-  const customTotal = customShares?.reduce((sum, s) => sum + s.cents, 0) ?? null;
-  const customDiff = amountCents != null && customTotal != null ? customTotal - amountCents : null;
+  const customTotal =
+    customShares?.reduce((sum, share) => sum + (share.originalMinor ?? share.cents), 0) ?? null;
+  const customDiff =
+    originalMinor != null && customTotal != null ? customTotal - originalMinor : null;
+  const customPreviewCents = useMemo(() => {
+    if (!isForeignCurrency(currency) || amountCents == null || !customShares || customDiff !== 0) {
+      return null;
+    }
+    const loaded = loadedCustom.current;
+    const textsMatch = Boolean(
+      loaded &&
+      loaded.currency === currency &&
+      loaded.amountCents === amountCents &&
+      loaded.minor === originalMinor &&
+      [...participantIds].sort().join("\0") === loaded.participantKey &&
+      participantIds.every((id) => (customAmounts[id] ?? "") === (loaded.texts[id] ?? "")),
+    );
+    if (textsMatch && loaded) {
+      const stored: Record<string, number> = {};
+      for (const share of loaded.shares) stored[share.memberId] = share.cents;
+      if (participantIds.every((id) => stored[id] != null)) return stored;
+    }
+    const parts = allocateByWeights(
+      amountCents,
+      customShares.map((share) => share.originalMinor ?? 0),
+    );
+    const preview: Record<string, number> = {};
+    customShares.forEach((share, index) => {
+      preview[share.memberId] = parts[index] ?? 0;
+    });
+    return preview;
+  }, [
+    currency,
+    amountCents,
+    customShares,
+    customDiff,
+    originalMinor,
+    participantIds,
+    customAmounts,
+  ]);
 
   function resetForm() {
     setTitle("");
@@ -320,10 +406,11 @@ export function AddExpenseDialog({
     setAcceptCache(false);
     setQuoteLoading(false);
     splitBasis.current = null;
+    loadedCustom.current = null;
     setPayerId(defaultPayerId ?? trip.members[0]?.id ?? "");
     setParticipantIds(trip.members.map((m) => m.id));
     setSplitMode("equal");
-    setCustomYuan({});
+    setCustomAmounts({});
     setError(null);
     setPending(false);
     setPhotos([]);
@@ -379,9 +466,23 @@ export function AddExpenseDialog({
           ? prev
           : prev.filter((x) => x !== id)
         : [...prev, id];
-      if (splitMode === "custom") fillEqualCustom(next, amountCents);
+      if (splitMode === "custom") fillEqualCustom(next, originalMinor);
       return next;
     });
+  }
+
+  function unchangedCustomShares(cents: number): ExpenseShare[] | null {
+    const loaded = loadedCustom.current;
+    if (!loaded || loaded.currency !== currency || loaded.amountCents !== cents) return null;
+    if (originalMinor == null || loaded.minor !== originalMinor) return null;
+    const key = [...participantIds].sort().join("\0");
+    if (key !== loaded.participantKey) return null;
+    for (const id of participantIds) {
+      if ((customAmounts[id] ?? "") !== (loaded.texts[id] ?? "")) return null;
+    }
+    const byId = new Map(loaded.shares.map((share) => [share.memberId, share]));
+    if (participantIds.some((id) => !byId.has(id))) return null;
+    return participantIds.map((id) => byId.get(id)!);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -408,15 +509,25 @@ export function AddExpenseDialog({
       return;
     }
     let shares: ExpenseShare[] | undefined;
-    try {
-      shares = normalizeExpenseShares({
-        participantIds,
-        amountCents: cents,
-        shares: splitMode === "custom" ? (customShares ?? undefined) : undefined,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "分摊金额不对");
-      return;
+    if (splitMode === "custom") {
+      const kept = unchangedCustomShares(cents);
+      const source = kept ?? customShares;
+      if (!source) {
+        setError(currency === "VND" ? "请按越南盾填写每个人的整数金额" : "请给每个人填写有效金额");
+        return;
+      }
+      try {
+        shares = normalizeExpenseShares({
+          participantIds,
+          amountCents: cents,
+          currency,
+          originalMinor: isForeignCurrency(currency) ? originalMinor : null,
+          shares: source,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "分摊金额不对");
+        return;
+      }
     }
     setPending(true);
     try {
@@ -589,7 +700,7 @@ export function AddExpenseDialog({
                     ? [payerId].filter(Boolean)
                     : trip.members.map((m) => m.id);
                   setParticipantIds(next);
-                  if (splitMode === "custom") fillEqualCustom(next, amountCents);
+                  if (splitMode === "custom") fillEqualCustom(next, originalMinor);
                 }}
               >
                 {allSelected ? "只留付款人" : "全选"}
@@ -637,7 +748,7 @@ export function AddExpenseDialog({
                 active={splitMode === "custom"}
                 onClick={() => {
                   setSplitMode("custom");
-                  fillEqualCustom(participantIds, amountCents);
+                  fillEqualCustom(participantIds, originalMinor);
                   setError(null);
                 }}
               >
@@ -649,24 +760,34 @@ export function AddExpenseDialog({
                 {participantIds.map((id) => {
                   const member = trip.members.find((m) => m.id === id);
                   if (!member) return null;
+                  const field = currencyFieldClass(currency);
+                  const preview = customPreviewCents?.[id];
                   return (
                     <li key={id} className="flex items-center gap-2">
                       <MemberAvatar member={member} size="sm" />
                       <span className="min-w-0 flex-1 truncate text-sm">{member.name}</span>
-                      <div className="relative w-28">
-                        <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-muted">
-                          ¥
-                        </span>
-                        <Input
-                          inputMode="decimal"
-                          value={customYuan[id] ?? ""}
-                          onChange={(e) => {
-                            setCustomYuan((prev) => ({ ...prev, [id]: e.target.value }));
-                            setError(null);
-                          }}
-                          className="h-10 pl-6 tabular-nums"
-                          placeholder="0.00"
-                        />
+                      <div className="flex flex-col items-end gap-0.5">
+                        <div className={cn("relative", field.box)}>
+                          <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-muted">
+                            {currencySymbol(currency)}
+                          </span>
+                          <Input
+                            inputMode={currency === "VND" ? "numeric" : "decimal"}
+                            value={customAmounts[id] ?? ""}
+                            onChange={(e) => {
+                              setCustomAmounts((prev) => ({ ...prev, [id]: e.target.value }));
+                              setError(null);
+                            }}
+                            className={cn("h-10 tabular-nums", field.input)}
+                            placeholder={currency === "VND" ? "0" : "0.00"}
+                            aria-label={`${member.name}的${currencyLabel(currency)}金额`}
+                          />
+                        </div>
+                        {preview != null ? (
+                          <span className="text-[11px] text-muted tabular-nums">
+                            折合 {formatMoney(preview)}
+                          </span>
+                        ) : null}
                       </div>
                     </li>
                   );
@@ -679,16 +800,18 @@ export function AddExpenseDialog({
                     )}
                   >
                     {customDiff === 0
-                      ? `加起来 ${formatMoney(customTotal ?? 0)}，对得上`
+                      ? `加起来 ${formatMinor(currency, customTotal ?? 0)}${
+                          isForeignCurrency(currency) && amountCents != null
+                            ? `，折合 ${formatMoney(amountCents)}`
+                            : ""
+                        }，对得上`
                       : customDiff > 0
-                        ? `比总额多了 ${formatMoney(customDiff)}`
-                        : `比总额少了 ${formatMoney(-customDiff)}`}
+                        ? `比总额多了 ${formatMinor(currency, customDiff)}`
+                        : `比总额少了 ${formatMinor(currency, -customDiff)}`}
                   </p>
                 ) : (
                   <p className="text-xs text-muted">
-                    每个人填自己那一份
-                    {isForeignCurrency(currency) ? "（人民币）" : ""}
-                    ，加起来要等于总价。
+                    每个人填自己那一份（{currencyLabel(currency)}），加起来要等于总价。
                   </p>
                 )}
               </ul>

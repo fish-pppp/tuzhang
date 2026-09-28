@@ -54,6 +54,8 @@ export const useTripStore = create<TripState>()(
           const shares = normalizeExpenseShares({
             participantIds: input.participantIds,
             amountCents: input.amountCents,
+            currency: input.currency,
+            originalMinor: input.originalMinor,
             shares: input.shares,
           });
           const photos = normalizeExpensePhotos(input.photos);
@@ -87,6 +89,8 @@ export const useTripStore = create<TripState>()(
           const shares = normalizeExpenseShares({
             participantIds: input.participantIds,
             amountCents: input.amountCents,
+            currency: input.currency,
+            originalMinor: input.originalMinor,
             shares: input.shares,
           });
           const next = {

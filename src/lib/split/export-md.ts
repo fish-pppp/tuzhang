@@ -1,7 +1,8 @@
 import { APP_UPDATED_LABEL, APP_VERSION } from "@/lib/app-version";
-import { computeLedger, expenseSplitLabel, shareBreakdown } from "./calc";
+import { computeLedger, expenseSplitLabel } from "./calc";
 import { formatCurrencyAmount, formatFeePercent, formatFxPair, isForeignCurrency } from "./fx.mjs";
 import { formatMoney } from "./money";
+import { formatShareAmount, shareRows } from "./shares";
 import { tripSettlements } from "./settlement";
 import {
   isActiveExpense,
@@ -49,7 +50,7 @@ function memberName(members: Map<string, Member>, id: string): string {
 
 function expenseBlock(expense: Expense, members: Map<string, Member>): string[] {
   const payer = memberName(members, expense.payerId);
-  const slices = shareBreakdown(expense);
+  const slices = shareRows(expense);
   const lines = [
     `### ${expense.title}`,
     "",
@@ -78,7 +79,13 @@ function expenseBlock(expense: Expense, members: Map<string, Member>): string[] 
     lines.push("");
     lines.push("每人承担：");
     for (const slice of slices) {
-      lines.push(`- ${memberName(members, slice.memberId)}：${formatMoney(slice.cents)}`);
+      lines.push(
+        `- ${memberName(members, slice.memberId)}：${formatShareAmount(
+          expense.currency ?? "CNY",
+          slice.cents,
+          slice.originalMinor,
+        )}`,
+      );
     }
   }
   lines.push("");

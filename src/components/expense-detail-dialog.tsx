@@ -11,10 +11,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { expenseInvolves, shareBreakdown, shareForMember } from "@/lib/split/calc";
+import { expenseInvolves } from "@/lib/split/calc";
 import { formatStamp } from "@/lib/split/date";
 import { formatCurrencyAmount, isForeignCurrency } from "@/lib/split/fx.mjs";
 import { formatMoney } from "@/lib/split/money";
+import { formatShareAmount, shareRows } from "@/lib/split/shares";
 import {
   isOpenExpense,
   isSettledExpense,
@@ -45,11 +46,15 @@ export function ExpenseDetailDialog({
   const open = Boolean(expense);
   const payer = expense ? membersById[expense.payerId] : undefined;
   const mine = Boolean(expense && meId && expenseInvolves(expense, meId));
-  const myShare = expense && meId ? shareForMember(expense, meId) : 0;
-  const slices = expense ? shareBreakdown(expense) : [];
+  const rows = expense ? shareRows(expense) : [];
+  const myRow = expense && meId ? rows.find((row) => row.memberId === meId) : undefined;
+  const myShare = myRow?.cents ?? 0;
+  const myShareLabel = expense
+    ? formatShareAmount(expense.currency ?? "CNY", myShare, myRow?.originalMinor ?? null)
+    : "";
   const othersOwe =
     expense && meId && expense.payerId === meId
-      ? slices.filter((s) => s.memberId !== meId).reduce((sum, s) => sum + s.cents, 0)
+      ? rows.filter((row) => row.memberId !== meId).reduce((sum, row) => sum + row.cents, 0)
       : 0;
   const canDelete = Boolean(expense && onDelete && isOpenExpense(expense));
   const creatorName = expense?.createdBy ? (membersById[expense.createdBy]?.name ?? "未知") : null;
@@ -89,14 +94,14 @@ export function ExpenseDetailDialog({
                 <div className="grid grid-cols-2 gap-2">
                   <AmountBox label="总价" value={formatMoney(expense.amountCents)} />
                   {mine ? (
-                    <AmountBox label="我要付" value={formatMoney(myShare)} tone="owe" />
+                    <AmountBox label="我要付" value={myShareLabel} tone="owe" />
                   ) : (
                     <AmountBox label="付款人" value={payer?.name ?? "未知"} />
                   )}
                 </div>
               )}
               {foreign && mine ? (
-                <p className="text-sm tabular-nums text-owe">我要付 {formatMoney(myShare)}</p>
+                <p className="text-sm tabular-nums text-owe">我要付 {myShareLabel}</p>
               ) : null}
               {foreign && expense.fx ? (
                 <FxFacts
@@ -124,10 +129,15 @@ export function ExpenseDetailDialog({
               <ExpensePhotoStrip photos={expense.photos} />
 
               <ul className="space-y-2">
-                {slices.map((slice) => {
+                {rows.map((slice) => {
                   const person = membersById[slice.memberId];
                   if (!person) return null;
                   const isPayer = slice.memberId === expense.payerId;
+                  const currency = expense.currency ?? "CNY";
+                  const original =
+                    slice.originalMinor != null && isForeignCurrency(currency)
+                      ? formatCurrencyAmount(currency, slice.originalMinor)
+                      : null;
                   return (
                     <li
                       key={slice.memberId}
@@ -141,7 +151,16 @@ export function ExpenseDetailDialog({
                         ) : null}
                         {isPayer ? <span className="ml-1 text-xs text-subtle">付</span> : null}
                       </span>
-                      <span className="text-sm tabular-nums">{formatMoney(slice.cents)}</span>
+                      {original ? (
+                        <span className="text-right text-sm tabular-nums">
+                          <span className="block">{original}</span>
+                          <span className="block text-xs text-muted">
+                            {formatMoney(slice.cents)}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-sm tabular-nums">{formatMoney(slice.cents)}</span>
+                      )}
                     </li>
                   );
                 })}

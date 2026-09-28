@@ -1,28 +1,42 @@
-import { formatFxSnapshot, isForeignCurrency } from "./fx.mjs";
+import { formatCurrencyAmount, formatFxSnapshot, isForeignCurrency } from "./fx.mjs";
 import { formatMoney } from "./money";
 import type { Expense, ExpenseEditChange, ExpenseShare, ShareSnapshot } from "./types";
 
 export function shareSnapshot(expense: {
   participantIds: string[];
   shares?: ExpenseShare[] | null;
+  currency?: Expense["currency"];
 }): ShareSnapshot[] {
   const ids = [...new Set(expense.participantIds)].sort((a, b) => a.localeCompare(b));
   const custom = (expense.shares ?? []).filter((share) => ids.includes(share.memberId));
   const useCustom = Boolean(
     expense.shares && expense.shares.length > 0 && custom.length === ids.length,
   );
-  const byId = new Map(custom.map((share) => [share.memberId, share.cents]));
-  return ids.map((memberId) => ({
-    memberId,
-    cents: useCustom ? (byId.get(memberId) ?? 0) : null,
-  }));
+  const byId = new Map(custom.map((share) => [share.memberId, share]));
+  const currency = expense.currency ?? "CNY";
+  return ids.map((memberId) => {
+    if (!useCustom) return { memberId, cents: null };
+    const share = byId.get(memberId);
+    const snap: ShareSnapshot = { memberId, cents: share?.cents ?? 0 };
+    if (share?.originalMinor != null && isForeignCurrency(currency)) {
+      snap.originalMinor = share.originalMinor;
+      snap.currency = currency;
+    }
+    return snap;
+  });
 }
 
 function sameShares(a: ShareSnapshot[], b: ShareSnapshot[]): boolean {
   if (a.length !== b.length) return false;
-  return a.every(
-    (item, index) => item.memberId === b[index]?.memberId && item.cents === b[index]?.cents,
-  );
+  return a.every((item, index) => {
+    const other = b[index];
+    return (
+      item.memberId === other?.memberId &&
+      item.cents === other?.cents &&
+      (item.originalMinor ?? null) === (other?.originalMinor ?? null) &&
+      (item.currency ?? null) === (other?.currency ?? null)
+    );
+  });
 }
 
 /** Fields that actually differ. Empty means the save is a no-op. */
@@ -105,7 +119,14 @@ export function formatShareSnapshot(
     return `${shares.map((share) => nameOf(share.memberId)).join("、")}（平均）`;
   }
   return shares
-    .map((share) => `${nameOf(share.memberId)} ${formatMoney(share.cents ?? 0)}`)
+    .map((share) => {
+      const name = nameOf(share.memberId);
+      const cny = formatMoney(share.cents ?? 0);
+      if (share.originalMinor != null && share.currency && isForeignCurrency(share.currency)) {
+        return `${name} ${formatCurrencyAmount(share.currency, share.originalMinor)}（${cny}）`;
+      }
+      return `${name} ${cny}`;
+    })
     .join("、");
 }
 
@@ -150,12 +171,36 @@ export function formatExpenseChange(
 
 function isShareSnapshot(value: unknown): value is ShareSnapshot {
   if (!value || typeof value !== "object") return false;
-  const row = value as { memberId?: unknown; cents?: unknown };
-  return (
-    typeof row.memberId === "string" &&
-    row.memberId.length > 0 &&
-    (row.cents === null || (typeof row.cents === "number" && Number.isInteger(row.cents)))
-  );
+  const row = value as {
+    memberId?: unknown;
+    cents?: unknown;
+    originalMinor?: unknown;
+    currency?: unknown;
+  };
+  if (typeof row.memberId !== "string" || row.memberId.length === 0) return false;
+  if (!(row.cents === null || (typeof row.cents === "number" && Number.isInteger(row.cents)))) {
+    return false;
+  }
+  if (
+    row.originalMinor != null &&
+    !(
+      typeof row.originalMinor === "number" &&
+      Number.isInteger(row.originalMinor) &&
+      row.originalMinor >= 0
+    )
+  ) {
+    return false;
+  }
+  if (
+    row.currency != null &&
+    row.currency !== "CNY" &&
+    row.currency !== "AUD" &&
+    row.currency !== "NZD" &&
+    row.currency !== "VND"
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export function parseExpenseChanges(raw: unknown): ExpenseEditChange[] {
