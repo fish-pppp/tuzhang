@@ -227,7 +227,8 @@ export const useTripStore = create<TripState>()(
         }),
     }),
     {
-      name: "tuzhang-trip-v4",
+      // v5 replaces the example roster so earlier local demos do not keep the old names.
+      name: "tuzhang-trip-v5",
       partialize: (s) => ({ trip: s.trip, meId: s.meId }),
       skipHydration: true,
     },

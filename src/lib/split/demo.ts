@@ -6,13 +6,13 @@ export const DEMO_TRIP: Trip = {
   id: "yunnan-7",
   name: "云南七日",
   members: [
-    { id: "yeah", name: "yeah", avatar: "/avatars/bei.jpg" },
-    { id: "xinxin", name: "欣欣", avatar: "/avatars/mi.jpg" },
-    { id: "yuki", name: "yuki", avatar: "/avatars/man.jpg" },
-    { id: "lin", name: "林子苑", avatar: "/avatars/ning.jpg" },
-    { id: "chen", name: "陈世节", avatar: "/avatars/zhe.jpg" },
-    { id: "yingjian", name: "硬件", avatar: "/avatars/kai.jpg" },
-    { id: "fu", name: "傅哥", avatar: "/avatars/zhou.jpg" },
+    { id: "yeah", name: "鹿野", avatar: "/avatars/bei.jpg" },
+    { id: "xinxin", name: "糯米", avatar: "/avatars/mi.jpg" },
+    { id: "yuki", name: "青柚", avatar: "/avatars/man.jpg" },
+    { id: "lin", name: "晚舟", avatar: "/avatars/ning.jpg" },
+    { id: "chen", name: "北岛", avatar: "/avatars/zhe.jpg" },
+    { id: "yingjian", name: "山竹", avatar: "/avatars/kai.jpg" },
+    { id: "fu", name: "老槐", avatar: "/avatars/zhou.jpg" },
   ],
   expenses: [
     {
