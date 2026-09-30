@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ChevronDown, Download, Plus, RotateCcw, Users } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ArrowRight, ChevronDown, Download, Plus, RotateCcw, Users, Wallet } from "lucide-react";
 import { AddExpenseDialog } from "@/components/add-expense-dialog";
 import { AuthSlot } from "@/components/auth-slot";
 import { DeleteExpenseDialog } from "@/components/delete-expense-dialog";
@@ -11,10 +12,12 @@ import { GroupSwitcher } from "@/components/group-switcher";
 import { MemberAvatar } from "@/components/member-avatar";
 import { MembersDialog } from "@/components/members-dialog";
 import { MyGroupsPanel } from "@/components/my-groups";
+import { SpendEntry } from "@/components/spend-page";
 import { SettleDialog } from "@/components/settle-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { computeLedger, expenseInvolves } from "@/lib/split/calc";
+import { spendBillsForTrip, spendSearch } from "@/lib/split/spend";
 import { canEditExpense } from "@/lib/split/expense-edit";
 import { formatStamp, groupByDay } from "@/lib/split/date";
 import { downloadMarkdown, exportFileName, exportTripMarkdown } from "@/lib/split/export-md";
@@ -114,6 +117,7 @@ export function TripView({
     () => (meId ? activeExpenses.filter((e) => expenseInvolves(e, meId)) : []),
     [activeExpenses, meId],
   );
+  const mySpendBills = useMemo(() => (meId ? spendBillsForTrip(trip, meId) : []), [meId, trip]);
   const deletedExpenses = useMemo(
     () => trip.expenses.filter((e) => !isActiveExpense(e)),
     [trip.expenses],
@@ -195,6 +199,15 @@ export function TripView({
           >
             <Download className="size-4" />
           </Button>
+          <Button variant="ghost" size="icon" className="size-10" asChild>
+            <Link
+              to="/spend"
+              search={spendSearch(variant === "demo", variant === "group" ? trip.id : undefined)}
+              aria-label="我的花费"
+            >
+              <Wallet className="size-4" />
+            </Link>
+          </Button>
           <AuthSlot />
         </div>
       </header>
@@ -218,6 +231,13 @@ export function TripView({
           <WhoAmI members={trip.members} onSetMe={onSetMe} />
         ) : (
           <div>
+            <SpendEntry
+              tripId={trip.id}
+              tripName={trip.name}
+              bills={mySpendBills}
+              demo={variant === "demo"}
+              groupId={variant === "group" ? trip.id : undefined}
+            />
             <MineNet cents={myNet} />
             <ExpenseDayList
               expenses={myExpenses}
