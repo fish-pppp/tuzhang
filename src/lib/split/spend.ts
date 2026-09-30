@@ -7,6 +7,8 @@ import {
 } from "./spend-summary.mjs";
 import { isActiveExpense, type Expense, type Trip } from "./types";
 
+export { normalizeSpendPartId, spendTitleKey } from "./spend-summary.mjs";
+
 export type { SpendSummary, SpendSummaryLine };
 
 export type SpendBillInput = {
@@ -54,8 +56,11 @@ export function spendBillsForTrip(trip: Trip, memberId: string): SpendBillInput[
   return bills;
 }
 
-export function buildSpendSummary(bills: SpendBillInput[]): SpendSummary {
-  return summarizeSpend(bills);
+export function buildSpendSummary(
+  bills: SpendBillInput[],
+  partOverrides?: Readonly<Record<string, string>> | null,
+): SpendSummary {
+  return summarizeSpend(bills, partOverrides);
 }
 
 export function formatSpendSharePercent(value: number): string {

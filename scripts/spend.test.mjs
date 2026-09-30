@@ -4,6 +4,7 @@ import {
   allocatePercents,
   classifySpendTitle,
   formatSpendPercent,
+  partsFromModelChoices,
   summarizeSpend,
 } from "../src/lib/split/spend-summary.mjs";
 
@@ -91,4 +92,36 @@ test("summarizeSpend totals my share and keeps fronted-only bills out of the par
     summary.bills.some((bill) => bill.id === "fronted"),
     false,
   );
+});
+
+test("a model label replaces the keyword guess for the same title", () => {
+  const bill = {
+    id: "ride",
+    title: "洱海骑行",
+    groupId: "g1",
+    groupName: "云南",
+    amountCents: 35000,
+    myShareCents: 7000,
+    paidByMe: false,
+    createdAt: "2026-08-13T11:20:00.000Z",
+    settled: false,
+  };
+  assert.equal(summarizeSpend([bill]).parts[0]?.id, "transport");
+  const summary = summarizeSpend([bill], { 洱海骑行: "play" });
+  assert.equal(summary.parts[0]?.id, "play");
+  assert.equal(summary.parts[0]?.label, "娱乐");
+  assert.equal(summarizeSpend([bill], { 洱海骑行: "不是类别" }).parts[0]?.id, "transport");
+});
+
+test("model choices keep only known parts and the titles that were sent", () => {
+  const parts = partsFromModelChoices(
+    ["洱海骑行", "昆明机场打车"],
+    [
+      { id: "0", part: "play" },
+      { id: "1", part: "交通" },
+      { id: "4", part: "food" },
+      { id: "1", part: "nope" },
+    ],
+  );
+  assert.deepEqual(parts, { 洱海骑行: "play", 昆明机场打车: "transport" });
 });
