@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as SpendRouteImport } from './routes/spend'
 import { Route as GGroupIdRouteImport } from './routes/g.$groupId'
 import { Route as JoinCodeRouteImport } from './routes/join.$code'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -25,6 +26,11 @@ const IndexRoute = IndexRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SpendRoute = SpendRouteImport.update({
+  id: '/spend',
+  path: '/spend',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GGroupIdRoute = GGroupIdRouteImport.update({
@@ -56,6 +62,7 @@ const ApiExpensePhotoPhotoIdRoute = ApiExpensePhotoPhotoIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/spend': typeof SpendRoute
   '/g/$groupId': typeof GGroupIdRoute
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/spend': typeof SpendRoute
   '/g/$groupId': typeof GGroupIdRoute
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/spend': typeof SpendRoute
   '/g/$groupId': typeof GGroupIdRoute
   '/join/$code': typeof JoinCodeRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/spend'
     | '/g/$groupId'
     | '/join/$code'
     | '/api/auth/$'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/spend'
     | '/g/$groupId'
     | '/join/$code'
     | '/api/auth/$'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/login'
+    | '/spend'
     | '/g/$groupId'
     | '/join/$code'
     | '/api/auth/$'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  SpendRoute: typeof SpendRoute
   GGroupIdRoute: typeof GGroupIdRoute
   JoinCodeRoute: typeof JoinCodeRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -135,6 +148,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/spend': {
+      id: '/spend'
+      path: '/spend'
+      fullPath: '/spend'
+      preLoaderRoute: typeof SpendRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/g/$groupId': {
@@ -178,6 +198,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  SpendRoute: SpendRoute,
   GGroupIdRoute: GGroupIdRoute,
   JoinCodeRoute: JoinCodeRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

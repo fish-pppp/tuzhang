@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
 import { memberBalance } from "./calc";
+import { toSpendBill, type SpendBillInput } from "./spend";
 import { normalizeDeleteReason } from "./delete-reason";
 import { diffExpenseEdits, parseExpenseChanges } from "./expense-edit";
 import { DEFAULT_FX_FEE_RATE, normalizeDecimal, parseFeePercent } from "./fx.mjs";
@@ -497,6 +498,79 @@ export const listMyGroups = createServerFn({ method: "GET" })
         expenseCount: bal.expenseCount,
       };
     });
+  });
+
+/** Every active bill this member paid or was charged for, across their groups. */
+export const loadMySpend = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<SpendBillInput[]> => {
+    const sql = await getSql();
+    const expenseRows = await sql<{
+      id: string;
+      group_id: string;
+      group_name: string;
+      title: string;
+      amount_cents: number;
+      payer_id: string;
+      settlement_id: string | null;
+      created_at: string;
+    }>`
+      select e.id, e.group_id, g.name as group_name, e.title, e.amount_cents, e.payer_id,
+             e.settlement_id, e.created_at::text as created_at
+      from group_expenses e
+      join groups g on g.id = e.group_id
+      join group_members me on me.group_id = e.group_id
+      where me.user_id = ${context.userId}
+        and me.removed_at is null
+        and e.deleted_at is null
+    `;
+    const shareRows = await sql<{
+      expense_id: string;
+      user_id: string;
+      amount_cents: number | null;
+    }>`
+      select s.expense_id, s.user_id, s.amount_cents
+      from group_expense_shares s
+      join group_expenses e on e.id = s.expense_id
+      join group_members me on me.group_id = e.group_id
+      where me.user_id = ${context.userId}
+        and me.removed_at is null
+        and e.deleted_at is null
+    `;
+    const sharesByExpense = new Map<string, { ids: string[]; custom: ExpenseShare[] }>();
+    for (const row of shareRows) {
+      const list = sharesByExpense.get(row.expense_id) ?? { ids: [], custom: [] };
+      list.ids.push(row.user_id);
+      if (row.amount_cents != null) {
+        list.custom.push({ memberId: row.user_id, cents: Number(row.amount_cents) });
+      }
+      sharesByExpense.set(row.expense_id, list);
+    }
+
+    const bills: SpendBillInput[] = [];
+    for (const row of expenseRows) {
+      const packed = sharesByExpense.get(row.id);
+      const custom =
+        packed && packed.custom.length === packed.ids.length && packed.custom.length > 0
+          ? packed.custom
+          : undefined;
+      const bill = toSpendBill(
+        {
+          id: row.id,
+          title: row.title,
+          amountCents: Number(row.amount_cents),
+          payerId: row.payer_id,
+          participantIds: packed?.ids ?? [],
+          ...(custom ? { shares: custom } : {}),
+          createdAt: row.created_at,
+          settlementId: row.settlement_id,
+        },
+        context.userId,
+        { id: row.group_id, name: row.group_name },
+      );
+      if (bill) bills.push(bill);
+    }
+    return bills;
   });
 
 async function createOwnedGroup(
