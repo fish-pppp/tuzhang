@@ -134,6 +134,18 @@ export function spendTitleKey(title) {
     .replace(/\s+/g, " ");
 }
 
+/** Below this, Jev's top option is too close to a guess. Leave the title for keywords. */
+export const JEV_MIN_PROBABILITY = 0.35;
+
+export function partFromJevChoice(choice, probability) {
+  const part = normalizeSpendPartId(choice);
+  if (!part) return null;
+  if (probability == null) return part;
+  const value = Number(probability);
+  if (!Number.isFinite(value) || value < JEV_MIN_PROBABILITY) return null;
+  return part;
+}
+
 export function normalizeSpendPartId(value) {
   const text = String(value ?? "").trim();
   if (!text) return null;

@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 
 type SpendView = "part" | "bill" | "group";
 
-const PART_CACHE_KEY = "tuzhang-spend-parts-v1";
+const PART_CACHE_KEY = "tuzhang-spend-parts-v2";
 const CLASSIFY_BATCH = 40;
 
 type SpendPartsState = {
@@ -152,7 +152,7 @@ export function SpendEntry({
   );
   if (summary.billCount === 0) return null;
   const hint = partsState.pending
-    ? "正在根据名称归类"
+    ? "正在用 Jev 归类"
     : summary.parts
         .slice(0, 3)
         .map((part) => `${part.label} ${formatMoney(part.cents)}`)
@@ -391,7 +391,7 @@ function SpendBody({
 
           {view === "part" && partsState.pending ? (
             <section className="mt-4 rounded-2xl bg-surface p-5 shadow-card">
-              <p className="text-sm text-muted">正在根据账单名称归类…</p>
+              <p className="text-sm text-muted">正在用 Jev 根据账单名称归类…</p>
             </section>
           ) : null}
 
@@ -399,8 +399,8 @@ function SpendBody({
             <div className="mt-4 space-y-3">
               <p className="px-1 text-xs text-subtle">
                 {partsState.unavailable
-                  ? "模型暂时没连上，先按关键词归类。"
-                  : "按名称把每一笔记到用途里。"}
+                  ? "Jev 暂时没连上，先按关键词归类。"
+                  : "Jev 按名称把每一笔记到用途里。"}
               </p>
               {summary.parts.map((part) => (
                 <PartBlock

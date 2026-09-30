@@ -4,6 +4,7 @@ import {
   allocatePercents,
   classifySpendTitle,
   formatSpendPercent,
+  partFromJevChoice,
   partsFromModelChoices,
   summarizeSpend,
 } from "../src/lib/split/spend-summary.mjs";
@@ -124,4 +125,11 @@ test("model choices keep only known parts and the titles that were sent", () => 
     ],
   );
   assert.deepEqual(parts, { 洱海骑行: "play", 昆明机场打车: "transport" });
+});
+
+test("Jev choices below the probability floor are left for keywords", () => {
+  assert.equal(partFromJevChoice("play", 0.82), "play");
+  assert.equal(partFromJevChoice("play", 0.2), null);
+  assert.equal(partFromJevChoice("玩乐", 0.9), null);
+  assert.equal(partFromJevChoice("food", null), "food");
 });

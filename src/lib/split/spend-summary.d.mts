@@ -54,6 +54,8 @@ export const SPEND_PART_IDS: readonly string[];
 
 export function spendPartLabel(id: string): string;
 export function spendTitleKey(title: string): string;
+export const JEV_MIN_PROBABILITY: number;
+export function partFromJevChoice(choice: unknown, probability?: number | null): string | null;
 export function normalizeSpendPartId(value: unknown): string | null;
 export function partsFromModelChoices(
   titles: readonly string[],
