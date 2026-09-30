@@ -1,4 +1,5 @@
-import { createGateway, experimental_evaluate as evaluate } from "ai";
+import { experimental_evaluate as evaluate } from "ai";
+import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
 import { partFromJevChoice, spendTitleKey } from "./spend-summary.mjs";
 
 /** TypeSafe evaluation model. It picks a category instead of writing text. */
@@ -46,7 +47,7 @@ type ChoiceAnswer = {
 function jevModel() {
   const apiKey = process.env.JEV_API_KEY?.trim();
   if (!apiKey) return SPEND_CLASSIFY_MODEL;
-  return createGateway({ apiKey }).evaluationModel(SPEND_CLASSIFY_MODEL);
+  return createTypeSafeAi({ apiKey }).evaluationModel("jev-latest");
 }
 
 async function classifyBatch(titles: string[]): Promise<Record<string, string>> {
