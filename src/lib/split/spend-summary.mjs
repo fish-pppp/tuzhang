@@ -1,4 +1,9 @@
-/** Spending parts inferred from a bill title. Order breaks equal-length ties. */
+/**
+ * Keyword fallback when the model is not available.
+ * The longest matching word wins, so a title can land in the wrong part
+ * ("洱海骑行" matches 骑行 and becomes 交通). The spend page asks a model
+ * to read the whole title and passes that result into `summarizeSpend`.
+ */
 export const SPEND_PARTS = [
   {
     id: "food",
@@ -115,9 +120,56 @@ export const SPEND_PARTS = [
 ];
 
 const PART_LABEL = new Map(SPEND_PARTS.map((part) => [part.id, part.label]));
+const PART_BY_LABEL = new Map(SPEND_PARTS.map((part) => [part.label, part.id]));
+export const SPEND_PART_IDS = SPEND_PARTS.map((part) => part.id);
 
 export function spendPartLabel(id) {
   return PART_LABEL.get(id) ?? "其他";
+}
+
+/** Collapse whitespace so the same name hits one cache entry. */
+export function spendTitleKey(title) {
+  return String(title ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/** Below this, Jev's top option is too close to a guess. Leave the title for keywords. */
+export const JEV_MIN_PROBABILITY = 0.35;
+
+export function partFromJevChoice(choice, probability) {
+  const part = normalizeSpendPartId(choice);
+  if (!part) return null;
+  if (probability == null) return part;
+  const value = Number(probability);
+  if (!Number.isFinite(value) || value < JEV_MIN_PROBABILITY) return null;
+  return part;
+}
+
+export function normalizeSpendPartId(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  if (PART_LABEL.has(lower)) return lower;
+  return PART_BY_LABEL.get(text) ?? null;
+}
+
+/**
+ * Map a model batch back onto the titles that were sent, in the same order.
+ * Unknown ids and unknown part names are dropped.
+ */
+export function partsFromModelChoices(titles, choices) {
+  const list = Array.isArray(titles) ? titles : [];
+  const out = {};
+  for (const choice of choices ?? []) {
+    const index = Number(choice?.id);
+    if (!Number.isInteger(index) || index < 0 || index >= list.length) continue;
+    const part = normalizeSpendPartId(choice?.part);
+    const key = spendTitleKey(list[index]);
+    if (!part || !key) continue;
+    out[key] = part;
+  }
+  return out;
 }
 
 /** Longest keyword wins. Equal length keeps the earlier part in `SPEND_PARTS`. */
@@ -198,7 +250,8 @@ function billView(bill, percent) {
  * Personal spend: what this person was charged on each bill (their share),
  * plus how much they fronted. Deleted bills must already be excluded.
  */
-export function summarizeSpend(bills) {
+export function summarizeSpend(bills, partOverrides) {
+  const overrides = partOverrides && typeof partOverrides === "object" ? partOverrides : null;
   let paidCents = 0;
   const mine = [];
   for (const bill of bills ?? []) {
@@ -206,16 +259,19 @@ export function summarizeSpend(bills) {
     const myShareCents = Math.max(0, Number(bill.myShareCents) || 0);
     if (bill.paidByMe) paidCents += amountCents;
     if (myShareCents <= 0) continue;
+    const title = String(bill.title ?? "").trim() || "未命名支出";
+    const key = spendTitleKey(title);
+    const chosen = overrides ? normalizeSpendPartId(overrides[key]) : null;
     mine.push({
       id: String(bill.id),
-      title: String(bill.title ?? "").trim() || "未命名支出",
+      title,
       groupId: String(bill.groupId ?? ""),
       groupName: String(bill.groupName ?? "").trim() || "未命名群组",
       amountCents,
       myShareCents,
       createdAt: String(bill.createdAt ?? ""),
       settled: Boolean(bill.settled),
-      partId: classifySpendTitle(bill.title),
+      partId: chosen ?? classifySpendTitle(title),
     });
   }
 

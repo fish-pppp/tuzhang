@@ -17,6 +17,7 @@ import { AuthSlot } from "@/components/auth-slot";
 import { MemberAvatar } from "@/components/member-avatar";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { friendlyError, isUnauthorizedError } from "@/lib/errors";
+import { classifySpendTitles } from "@/lib/split/classify-spend";
 import { formatDay } from "@/lib/split/date";
 import { loadMySpend } from "@/lib/split/group-api";
 import { formatMoney } from "@/lib/split/money";
@@ -24,7 +25,9 @@ import {
   buildSpendSummary,
   formatSpendSharePercent,
   spendBillsForTrip,
+  normalizeSpendPartId,
   spendSearch,
+  spendTitleKey,
   type SpendBillInput,
   type SpendLine,
 } from "@/lib/split/spend";
@@ -32,6 +35,91 @@ import { useTripStore } from "@/lib/split/store";
 import { cn } from "@/lib/utils";
 
 type SpendView = "part" | "bill" | "group";
+
+const PART_CACHE_KEY = "tuzhang-spend-parts-v2";
+const CLASSIFY_BATCH = 40;
+
+type SpendPartsState = {
+  /** Model labels keyed by normalized title. Null while loading or when the model is down. */
+  parts: Record<string, string> | null;
+  pending: boolean;
+  unavailable: boolean;
+};
+
+function readPartCache(): Record<string, string> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(PART_CACHE_KEY) ?? "") as {
+      parts?: Record<string, unknown>;
+    };
+    const parts: Record<string, string> = {};
+    for (const [title, part] of Object.entries(raw.parts ?? {})) {
+      const partId = normalizeSpendPartId(part);
+      if (partId) parts[title] = partId;
+    }
+    return parts;
+  } catch {
+    return {};
+  }
+}
+
+function writePartCache(parts: Record<string, string>) {
+  if (typeof localStorage === "undefined") return;
+  const next = { ...readPartCache(), ...parts };
+  localStorage.setItem(PART_CACHE_KEY, JSON.stringify({ parts: next }));
+}
+
+function uniqueTitleKey(titles: string[]): string {
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const title of titles) {
+    const key = spendTitleKey(title);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    list.push(key);
+  }
+  list.sort();
+  return list.join("\n");
+}
+
+function useSpendParts(titles: string[]): SpendPartsState {
+  const uniqueKey = useMemo(() => uniqueTitleKey(titles), [titles]);
+  const unique = useMemo(() => (uniqueKey ? uniqueKey.split("\n") : []), [uniqueKey]);
+  const query = useQuery({
+    queryKey: ["spend-parts", uniqueKey],
+    enabled: unique.length > 0,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      const known = readPartCache();
+      const missing = unique.filter((title) => !known[title]);
+      const picked: Record<string, string> = {};
+      for (const title of unique) {
+        const part = known[title];
+        if (part) picked[title] = part;
+      }
+      if (missing.length === 0) return { parts: picked, source: "model" as const };
+      let source: "model" | "unavailable" = "model";
+      const fresh: Record<string, string> = {};
+      for (let i = 0; i < missing.length; i += CLASSIFY_BATCH) {
+        const result = await classifySpendTitles({
+          data: { titles: missing.slice(i, i + CLASSIFY_BATCH) },
+        });
+        if (result.source !== "model") source = "unavailable";
+        Object.assign(fresh, result.parts);
+      }
+      if (source === "model") writePartCache(fresh);
+      return { parts: { ...picked, ...fresh }, source };
+    },
+  });
+
+  if (unique.length === 0) return { parts: null, pending: false, unavailable: false };
+  if (query.isPending) return { parts: null, pending: true, unavailable: false };
+  if (query.isError || query.data?.source !== "model") {
+    return { parts: null, pending: false, unavailable: true };
+  }
+  return { parts: query.data.parts, pending: false, unavailable: false };
+}
 
 const PART_ICON: Record<string, LucideIcon> = {
   food: UtensilsCrossed,
@@ -56,12 +144,19 @@ export function SpendEntry({
   demo: boolean;
   groupId?: string;
 }) {
-  const summary = useMemo(() => buildSpendSummary(bills), [bills]);
+  const titles = useMemo(() => bills.map((bill) => bill.title), [bills]);
+  const partsState = useSpendParts(titles);
+  const summary = useMemo(
+    () => buildSpendSummary(bills, partsState.parts),
+    [bills, partsState.parts],
+  );
   if (summary.billCount === 0) return null;
-  const hint = summary.parts
-    .slice(0, 3)
-    .map((part) => `${part.label} ${formatMoney(part.cents)}`)
-    .join(" · ");
+  const hint = partsState.pending
+    ? "正在用 Jev 归类"
+    : summary.parts
+        .slice(0, 3)
+        .map((part) => `${part.label} ${formatMoney(part.cents)}`)
+        .join(" · ");
   return (
     <Link
       to="/spend"
@@ -212,12 +307,20 @@ function SpendBody({
 }) {
   const [scope, setScope] = useState(groupId ?? "all");
   const [view, setView] = useState<SpendView>("part");
-  const allSummary = useMemo(() => buildSpendSummary(bills), [bills]);
+  const titles = useMemo(() => bills.map((bill) => bill.title), [bills]);
+  const partsState = useSpendParts(titles);
+  const allSummary = useMemo(
+    () => buildSpendSummary(bills, partsState.parts),
+    [bills, partsState.parts],
+  );
   const scopedBills = useMemo(
     () => (scope === "all" ? bills : bills.filter((bill) => bill.groupId === scope)),
     [bills, scope],
   );
-  const summary = useMemo(() => buildSpendSummary(scopedBills), [scopedBills]);
+  const summary = useMemo(
+    () => buildSpendSummary(scopedBills, partsState.parts),
+    [partsState.parts, scopedBills],
+  );
   const showScope = Boolean(groupId) && allSummary.groups.some((group) => group.id !== groupId);
   const focused = allSummary.groups.find((group) => group.id === groupId);
   const showGroupView = summary.groups.length > 1;
@@ -286,9 +389,19 @@ function SpendBody({
             ) : null}
           </div>
 
-          {view === "part" ? (
+          {view === "part" && partsState.pending ? (
+            <section className="mt-4 rounded-2xl bg-surface p-5 shadow-card">
+              <p className="text-sm text-muted">正在用 Jev 根据账单名称归类…</p>
+            </section>
+          ) : null}
+
+          {view === "part" && !partsState.pending ? (
             <div className="mt-4 space-y-3">
-              <p className="px-1 text-xs text-subtle">按账单名称归到每一部分</p>
+              <p className="px-1 text-xs text-subtle">
+                {partsState.unavailable
+                  ? "Jev 暂时没连上，先按关键词归类。"
+                  : "Jev 按名称把每一笔记到用途里。"}
+              </p>
               {summary.parts.map((part) => (
                 <PartBlock
                   key={part.id}
