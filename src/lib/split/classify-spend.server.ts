@@ -1,4 +1,4 @@
-import { experimental_evaluate as evaluate } from "ai";
+import { createGateway, experimental_evaluate as evaluate } from "ai";
 import { partFromJevChoice, spendTitleKey } from "./spend-summary.mjs";
 
 /** TypeSafe evaluation model. It picks a category instead of writing text. */
@@ -43,6 +43,12 @@ type ChoiceAnswer = {
   probabilities?: Record<string, number>;
 };
 
+function jevModel() {
+  const apiKey = process.env.JEV_API_KEY?.trim();
+  if (!apiKey) return SPEND_CLASSIFY_MODEL;
+  return createGateway({ apiKey }).evaluationModel(SPEND_CLASSIFY_MODEL);
+}
+
 async function classifyBatch(titles: string[]): Promise<Record<string, string>> {
   const questions: Record<
     string,
@@ -56,7 +62,7 @@ async function classifyBatch(titles: string[]): Promise<Record<string, string>> 
     };
   });
   const result = await evaluate({
-    model: SPEND_CLASSIFY_MODEL,
+    model: jevModel(),
     state: STATE,
     questions,
     abortSignal: AbortSignal.timeout(12_000),

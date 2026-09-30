@@ -98,6 +98,7 @@ openssl rand -base64 32   # 得到 BETTER_AUTH_SECRET
 | `SMTP_SECURE` | 可选 | `465` 默认加密。`587` 会先连明文再 STARTTLS。 |
 | `SMTP_USER` / `SMTP_PASS` | SMTP 时通常要 | QQ / 163 填授权码，不是登录密码。 |
 | `EMAIL_OTP_ALLOW_LOG` | 本地调试 | `true` 时不发信、把验证码打到服务器日志。线上不要开。 |
+| `JEV_API_KEY` | 本地归类时要 | 花费页用 Jev 读账单名称。填 AI Gateway 里创建的密钥。线上走 OIDC，不用填；不填就按关键词归类。 |
 
 ### 3. 在 Vercel 导入仓库
 
